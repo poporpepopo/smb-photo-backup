@@ -6,6 +6,7 @@ import com.hierynomus.security.bc.BCSecurityProvider
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
+import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.share.DiskShare
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,7 +30,7 @@ object SmbGateway {
      * Connects, authenticates, opens the share and runs [block] on an IO thread. Any
      * failure is rethrown as [SmbFailureException].
      */
-    suspend fun <T> withShare(target: SmbTarget, block: (DiskShare) -> T): T =
+    suspend fun <T> withShare(target: SmbTarget, block: (OpenShare) -> T): T =
         withContext(Dispatchers.IO) {
             try {
                 SMBClient(config).use { client ->
@@ -41,7 +42,9 @@ object SmbGateway {
                         }
                         val session = conn.authenticate(auth)
                         try {
-                            (session.connectShare(target.share) as DiskShare).use(block)
+                            (session.connectShare(target.share) as DiskShare).use { disk ->
+                                block(OpenShare(disk, conn))
+                            }
                         } finally {
                             runCatching { session.close() }
                         }
@@ -54,11 +57,17 @@ object SmbGateway {
             }
         }
 
+    /** An open share plus a way to tell a dead connection from a one-file failure. */
+    class OpenShare(val disk: DiskShare, private val connection: Connection) {
+        val isAlive: Boolean get() = connection.isConnected && disk.isConnected
+    }
+
     data class ShareListing(val folders: List<String>, val destinationExists: Boolean)
 
     /** The connection test: list the share root and check the destination folder. */
     suspend fun probeShare(target: SmbTarget, folder: String): ShareListing =
-        withShare(target) { share ->
+        withShare(target) { open ->
+            val share = open.disk
             val folders = share.list("")
                 .filter { it.fileName != "." && it.fileName != ".." }
                 .filter {

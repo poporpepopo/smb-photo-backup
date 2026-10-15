@@ -38,7 +38,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.poporpepopo.photobackup.PhotoBackupApp
 import io.github.poporpepopo.photobackup.R
-import io.github.poporpepopo.photobackup.backup.UploadResult
+import io.github.poporpepopo.photobackup.backup.NotReadyReason
+import io.github.poporpepopo.photobackup.backup.SyncOutcome
+import io.github.poporpepopo.photobackup.backup.SyncSummary
 import io.github.poporpepopo.photobackup.media.MediaAccess
 import io.github.poporpepopo.photobackup.media.MediaPermissionState
 import io.github.poporpepopo.photobackup.media.MediaPermissions
@@ -62,8 +64,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         state.permission?.let { PermissionCard(it, onResult = vm::refresh) }
-        MediaCountCard(state)
-        SendCard(state.send, enabled = state.permission?.access != MediaAccess.None, onSend = vm::sendLatest)
+        SyncCard(state, onSync = vm::syncNow)
     }
 }
 
@@ -118,45 +119,92 @@ private fun PermissionCard(p: MediaPermissionState, onResult: () -> Unit) {
 }
 
 @Composable
-private fun MediaCountCard(state: HomeState) {
-    val images = state.imageCount ?: return
-    HomeCard {
-        Text(
-            if (state.includeVideos) {
-                stringResource(R.string.media_counts, images, state.videoCount ?: 0)
-            } else {
-                stringResource(R.string.media_counts_photos_only, images)
-            },
-        )
+private fun SyncCard(state: HomeState, onSync: () -> Unit) {
+    val context = LocalContext.current
+    fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
+    val sync = state.sync
+    val failed = sync is SyncUiState.Done && sync.outcome !is SyncOutcome.Finished
+
+    HomeCard(title = stringResource(R.string.sync_title), warn = failed) {
+        val uploaded = state.uploadedCount
+        val pending = state.pendingCount
+        if (uploaded != null && pending != null) {
+            Text(
+                stringResource(
+                    if (state.includeVideos) R.string.sync_counts else R.string.sync_counts_photos_only,
+                    uploaded,
+                    pending,
+                ),
+            )
+        }
+        Button(
+            onClick = onSync,
+            enabled = state.permission?.access != MediaAccess.None && sync !is SyncUiState.Running,
+        ) { Text(stringResource(R.string.button_sync_now)) }
+
+        when (sync) {
+            SyncUiState.Idle -> Unit
+            is SyncUiState.Running -> {
+                val p = sync.progress
+                if (p == null) {
+                    Text(stringResource(R.string.sync_preparing))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                } else {
+                    Text(stringResource(R.string.sync_progress, p.index + 1, p.total, p.name))
+                    LinearProgressIndicator(
+                        progress = { (p.index + fraction(p.sent, p.size)) / p.total },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        stringResource(R.string.sync_file_progress, size(p.sent), size(p.size)),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            is SyncUiState.Done -> OutcomeText(sync.outcome)
+        }
     }
 }
 
-@Composable
-private fun SendCard(send: SendState, enabled: Boolean, onSend: () -> Unit) {
-    val context = LocalContext.current
-    fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
+private fun fraction(sent: Long, size: Long) = if (size > 0) sent.toFloat() / size else 1f
 
-    HomeCard(title = stringResource(R.string.test_tools_title), warn = send is SendState.Failed) {
-        OutlinedButton(onClick = onSend, enabled = enabled && send !is SendState.Running) {
-            Text(stringResource(R.string.button_send_latest))
+@Composable
+private fun OutcomeText(outcome: SyncOutcome) {
+    val summary = when (outcome) {
+        is SyncOutcome.Finished -> outcome.summary
+        is SyncOutcome.Aborted -> {
+            Text(errorText(UiError.Smb(outcome.failure), host = ""))
+            outcome.summary
         }
-        when (send) {
-            SendState.Idle -> Unit
-            is SendState.Running -> {
-                Text(stringResource(R.string.send_progress, send.name, size(send.sent), size(send.total)))
-                LinearProgressIndicator(
-                    progress = { if (send.total > 0) send.sent.toFloat() / send.total else 0f },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            is SendState.Done -> Text(
-                when (val r = send.result) {
-                    is UploadResult.Uploaded -> stringResource(R.string.send_done, r.path)
-                    is UploadResult.AlreadyPresent -> stringResource(R.string.send_already, r.path)
-                },
+        SyncOutcome.NotHome -> {
+            Text(stringResource(R.string.sync_not_home))
+            null
+        }
+        is SyncOutcome.NotReady -> {
+            Text(
+                errorText(
+                    when (outcome.reason) {
+                        NotReadyReason.NoPermission -> UiError.NoPermission
+                        NotReadyReason.NotConfigured -> UiError.NotConfigured
+                        NotReadyReason.PasswordUnreadable -> UiError.PasswordUnreadable
+                    },
+                    host = "",
+                ),
             )
-            is SendState.Failed -> Text(errorText(send.error, send.host))
+            null
         }
+    } ?: return
+
+    if (outcome is SyncOutcome.Finished && summary == SyncSummary()) {
+        Text(stringResource(R.string.sync_nothing_to_do))
+        return
+    }
+    Text(stringResource(R.string.sync_summary, summary.uploaded, summary.alreadyPresent, summary.failed))
+    summary.lastItemError?.let {
+        Text(
+            stringResource(R.string.sync_item_error, it.name, it.detail),
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

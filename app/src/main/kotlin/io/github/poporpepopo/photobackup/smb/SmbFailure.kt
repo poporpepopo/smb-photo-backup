@@ -2,6 +2,9 @@ package io.github.poporpepopo.photobackup.smb
 
 import com.hierynomus.mserref.NtStatus
 import com.hierynomus.mssmb2.SMBApiException
+import com.hierynomus.protocol.transport.TransportException
+import java.io.EOFException
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.util.concurrent.TimeoutException
 
@@ -9,6 +12,8 @@ import java.util.concurrent.TimeoutException
 sealed interface SmbFailure {
     data object Unreachable : SmbFailure
     data object Timeout : SmbFailure
+    /** The connection dropped mid-way (router rebooted, Wi-Fi lost, ...). */
+    data object ConnectionLost : SmbFailure
     data object AuthFailed : SmbFailure
     data object ShareNotFound : SmbFailure
     data object AccessDenied : SmbFailure
@@ -23,6 +28,12 @@ sealed interface SmbFailure {
                     is SMBApiException -> return fromStatus(t.status) ?: Other(t.status.name)
                     is SocketTimeoutException, is TimeoutException -> return Timeout
                     is java.net.ConnectException, is java.net.NoRouteToHostException -> return Unreachable
+                }
+            }
+            // Checked after the loop so a more specific cause (timeout, refused) wins.
+            for (t in generateSequence(e) { it.cause }) {
+                if (t is EOFException || t is SocketException || t is TransportException) {
+                    return ConnectionLost
                 }
             }
             return Other(e.message ?: e.javaClass.simpleName)

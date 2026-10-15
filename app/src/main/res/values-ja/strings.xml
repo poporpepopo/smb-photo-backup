@@ -31,6 +31,7 @@
     <string name="error_share_required">共有名を入力してください</string>
     <string name="error_unreachable">%1$s の445番ポートに届きません。家のWi-Fiにつながっているか、IPアドレスが正しいか確認してください。</string>
     <string name="error_timeout">ルーターから時間内に応答がありませんでした。</string>
+    <string name="error_connection_lost">ルーターとの接続が切れました。次の同期で続きから送ります。</string>
     <string name="error_auth">ユーザー名かパスワードが違います。</string>
     <string name="error_share_not_found">その名前の共有はありません。</string>
     <string name="error_access_denied">このユーザーには共有へのアクセス権がありません。</string>
@@ -48,16 +49,21 @@
     <string name="button_grant">アクセスを許可</string>
     <string name="button_grant_all">すべて許可する</string>
     <string name="button_open_app_settings">アプリの設定を開く</string>
-    <string name="media_counts">この端末：写真 %1$d 件・動画 %2$d 件</string>
-    <string name="media_counts_photos_only">この端末：写真 %1$d 件（動画は対象外）</string>
 
-    <string name="test_tools_title">テスト：1件だけ送信</string>
-    <string name="button_send_latest">最新の1件を送信</string>
-    <string name="send_progress">%1$s を送信中… %2$s / %3$s</string>
-    <string name="send_done">%1$s に送信しました</string>
-    <string name="send_already">同じ内容のファイルが %1$s にすでにあります</string>
 
     <string name="error_not_configured">先に設定画面でルーターと共有を入力してください。</string>
     <string name="error_no_permission">先に写真と位置情報へのアクセスを許可してください。</string>
     <string name="error_no_media">送信できる写真・動画がありません。</string>
+
+    <string name="sync_title">バックアップ</string>
+    <string name="sync_counts">送信済み %1$d 件・未送信 %2$d 件</string>
+    <string name="sync_counts_photos_only">送信済み %1$d 件・未送信 %2$d 件（動画は対象外）</string>
+    <string name="button_sync_now">今すぐ同期</string>
+    <string name="sync_preparing">接続しています…</string>
+    <string name="sync_progress">%1$d / %2$d：%3$s</string>
+    <string name="sync_file_progress">%1$s / %2$s</string>
+    <string name="sync_nothing_to_do">すべて送信済みです。</string>
+    <string name="sync_summary">送信 %1$d 件・既にあり %2$d 件・失敗 %3$d 件</string>
+    <string name="sync_item_error">%1$s を送れませんでした：%2$s</string>
+    <string name="sync_not_home">ルーターに届きません。家のWi-Fiにつながっていますか？</string>
 </resources>

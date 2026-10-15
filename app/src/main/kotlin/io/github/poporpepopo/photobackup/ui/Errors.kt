@@ -27,6 +27,7 @@ fun errorText(e: UiError, host: String): String = when (e) {
     is UiError.Smb -> when (val f = e.failure) {
         SmbFailure.Unreachable -> stringResource(R.string.error_unreachable, host)
         SmbFailure.Timeout -> stringResource(R.string.error_timeout)
+        SmbFailure.ConnectionLost -> stringResource(R.string.error_connection_lost)
         SmbFailure.AuthFailed -> stringResource(R.string.error_auth)
         SmbFailure.ShareNotFound -> stringResource(R.string.error_share_not_found)
         SmbFailure.AccessDenied -> stringResource(R.string.error_access_denied)

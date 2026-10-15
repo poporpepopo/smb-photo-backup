@@ -32,7 +32,7 @@ class SmbIntegrationTest {
         LocalFile(id, name, bytes.size.toLong()) { ByteArrayInputStream(bytes) }
 
     private fun upload(f: LocalFile) = runBlocking {
-        SmbGateway.withShare(target()) { Uploader(it).upload(f, dir) }
+        SmbGateway.withShare(target()) { Uploader(it.disk).upload(f, dir) }
     }
 
     private fun onDisk(name: String) = File(root, "$dir/$name")
