@@ -66,4 +66,13 @@
     <string name="sync_summary">Uploaded: %1$d · Already on the share: %2$d · Failed: %3$d</string>
     <string name="sync_item_error">Could not send %1$s: %2$s</string>
     <string name="sync_not_home">The router could not be reached. Are you on your home Wi-Fi?</string>
+    <string name="notif_channel_sync">Backup progress</string>
+    <string name="notif_sync_title">Backing up photos</string>
+    <string name="notif_permission_title">Notifications</string>
+    <string name="notif_permission_text">Allow notifications to see the progress of long uploads. Backups run without them too.</string>
+    <string name="button_allow_notifications">Allow notifications</string>
+    <string name="sync_last_success">Last sync: %1$s</string>
+    <string name="sync_never">Not synced yet.</string>
+    <string name="sync_last_run">Last run (%1$s)</string>
+    <string name="sync_queued">Waiting to start…</string>
 </resources>

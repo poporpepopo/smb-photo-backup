@@ -2,14 +2,21 @@ package io.github.poporpepopo.photobackup.backup
 
 import io.github.poporpepopo.photobackup.smb.SmbGateway
 import io.github.poporpepopo.photobackup.smb.SmbTarget
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
 
 /**
  * Runs [Uploader] against a real SMB server. Skipped unless SMB_TEST_PORT (server on
@@ -58,5 +65,36 @@ class SmbIntegrationTest {
     @Test(timeout = 60_000) fun emptyFile() {
         assertEquals(UploadResult.Uploaded("$dir/empty.jpg", 0), upload(local(3, ByteArray(0), "empty.jpg")))
         assertEquals(UploadResult.AlreadyPresent("$dir/empty.jpg"), upload(local(3, ByteArray(0), "empty.jpg")))
+    }
+
+    @Test(timeout = 60_000) fun cancellingMidUploadStopsPromptly() = runBlocking {
+        // 4 GiB of zeros, produced on demand: far more than can be sent before we cancel.
+        val size = 4L shl 30
+        val big = LocalFile(4, "big.mp4", size) {
+            object : InputStream() {
+                var left = size
+                override fun read() = if (left-- > 0) 0 else -1
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (left <= 0) return -1
+                    val n = minOf(len.toLong(), left).toInt()
+                    b.fill(0, off, off + n)
+                    left -= n
+                    return n
+                }
+            }
+        }
+        val moving = CompletableDeferred<Unit>()
+        val job = launch(Dispatchers.Default) {
+            SmbGateway.withShare(target()) {
+                Uploader(it.disk).upload(big, dir) { sent, _ -> if (sent > 10_000_000) moving.complete(Unit) }
+            }
+        }
+        moving.await()
+        val started = System.nanoTime()
+        job.cancelAndJoin()
+        val tookMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("cancel took $tookMs ms", tookMs < 5_000)
+        assertTrue(job.isCancelled)
+        assertFalse(onDisk("big.mp4").exists())
     }
 }

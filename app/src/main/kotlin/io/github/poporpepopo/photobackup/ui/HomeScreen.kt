@@ -1,8 +1,12 @@
 package io.github.poporpepopo.photobackup.ui
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,6 +43,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.poporpepopo.photobackup.PhotoBackupApp
 import io.github.poporpepopo.photobackup.R
 import io.github.poporpepopo.photobackup.backup.NotReadyReason
+import io.github.poporpepopo.photobackup.backup.RunState
 import io.github.poporpepopo.photobackup.backup.SyncOutcome
 import io.github.poporpepopo.photobackup.backup.SyncSummary
 import io.github.poporpepopo.photobackup.media.MediaAccess
@@ -64,6 +69,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         state.permission?.let { PermissionCard(it, onResult = vm::refresh) }
+        if (!state.notificationsAllowed) NotificationCard(onResult = vm::refresh)
         SyncCard(state, onSync = vm::syncNow)
     }
 }
@@ -104,26 +110,62 @@ private fun PermissionCard(p: MediaPermissionState, onResult: () -> Unit) {
                     )
                 }
                 if (asked || p.access == MediaAccess.Partial) {
-                    OutlinedButton(onClick = {
-                        context.startActivity(
-                            Intent(
-                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.fromParts("package", context.packageName, null),
-                            ),
-                        )
-                    }) { Text(stringResource(R.string.button_open_app_settings)) }
+                    OutlinedButton(onClick = { openAppSettings(context) }) {
+                        Text(stringResource(R.string.button_open_app_settings))
+                    }
                 }
             }
         }
     }
 }
 
+/** Optional: without it the pass still runs, but its progress notification is hidden. */
+@Composable
+private fun NotificationCard(onResult: () -> Unit) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val context = LocalContext.current
+    var asked by rememberSaveable { mutableStateOf(false) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        asked = true
+        onResult()
+    }
+    HomeCard(title = stringResource(R.string.notif_permission_title)) {
+        Text(stringResource(R.string.notif_permission_text))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                Text(stringResource(R.string.button_allow_notifications))
+            }
+            if (asked) {
+                OutlinedButton(onClick = { openAppSettings(context) }) {
+                    Text(stringResource(R.string.button_open_app_settings))
+                }
+            }
+        }
+    }
+}
+
+private fun openAppSettings(context: Context) {
+    context.startActivity(
+        Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", context.packageName, null),
+        ),
+    )
+}
+
 @Composable
 private fun SyncCard(state: HomeState, onSync: () -> Unit) {
     val context = LocalContext.current
     fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
-    val sync = state.sync
-    val failed = sync is SyncUiState.Done && sync.outcome !is SyncOutcome.Finished
+    fun time(millis: Long) = DateUtils.formatDateTime(
+        context,
+        millis,
+        DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_NUMERIC_DATE,
+    )
+    val run = state.run
+    val lastRun = state.status.lastRun
+    val failed = lastRun != null && run == RunState.Idle &&
+        (lastRun.outcome is SyncOutcome.Aborted || lastRun.outcome is SyncOutcome.NotReady)
 
     HomeCard(title = stringResource(R.string.sync_title), warn = failed) {
         val uploaded = state.uploadedCount
@@ -137,36 +179,42 @@ private fun SyncCard(state: HomeState, onSync: () -> Unit) {
                 ),
             )
         }
+        Text(
+            state.status.lastSyncAt?.let { stringResource(R.string.sync_last_success, time(it)) }
+                ?: stringResource(R.string.sync_never),
+        )
         Button(
             onClick = onSync,
-            enabled = state.permission?.access != MediaAccess.None && sync !is SyncUiState.Running,
+            enabled = state.permission?.access != MediaAccess.None && run == RunState.Idle && !state.queued,
         ) { Text(stringResource(R.string.button_sync_now)) }
 
-        when (sync) {
-            SyncUiState.Idle -> Unit
-            is SyncUiState.Running -> {
-                val p = sync.progress
-                if (p == null) {
-                    Text(stringResource(R.string.sync_preparing))
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                } else {
-                    Text(stringResource(R.string.sync_progress, p.index + 1, p.total, p.name))
-                    LinearProgressIndicator(
-                        progress = { (p.index + fraction(p.sent, p.size)) / p.total },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+        when (run) {
+            RunState.Preparing -> {
+                Text(stringResource(R.string.sync_preparing))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            is RunState.Sending -> {
+                val p = run.progress
+                Text(stringResource(R.string.sync_progress, p.index + 1, p.total, p.name))
+                LinearProgressIndicator(progress = { p.overall }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    stringResource(R.string.sync_file_progress, size(p.sent), size(p.size)),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            RunState.Idle -> when {
+                state.queued -> Text(stringResource(R.string.sync_queued))
+                lastRun != null -> {
                     Text(
-                        stringResource(R.string.sync_file_progress, size(p.sent), size(p.size)),
-                        style = MaterialTheme.typography.bodySmall,
+                        stringResource(R.string.sync_last_run, time(lastRun.atMillis)),
+                        style = MaterialTheme.typography.labelMedium,
                     )
+                    OutcomeText(lastRun.outcome)
                 }
             }
-            is SyncUiState.Done -> OutcomeText(sync.outcome)
         }
     }
 }
-
-private fun fraction(sent: Long, size: Long) = if (size > 0) sent.toFloat() / size else 1f
 
 @Composable
 private fun OutcomeText(outcome: SyncOutcome) {

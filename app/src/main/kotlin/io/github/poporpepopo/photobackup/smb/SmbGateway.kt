@@ -8,9 +8,17 @@ import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.share.DiskShare
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Opens one connection per call. A backup run is a short burst every 15 minutes at most,
@@ -29,32 +37,57 @@ object SmbGateway {
     /**
      * Connects, authenticates, opens the share and runs [block] on an IO thread. Any
      * failure is rethrown as [SmbFailureException].
+     *
+     * Cancellation interrupts [block] and force-closes the socket, so a call stuck in a
+     * socket write (which an interrupt alone does not end) returns promptly too.
      */
     suspend fun <T> withShare(target: SmbTarget, block: (OpenShare) -> T): T =
-        withContext(Dispatchers.IO) {
-            try {
-                SMBClient(config).use { client ->
-                    client.connect(target.host, target.port).use { conn ->
-                        val auth = if (target.username.isBlank()) {
-                            AuthenticationContext.guest()
-                        } else {
-                            AuthenticationContext(target.username, target.passwordChars(), null)
-                        }
-                        val session = conn.authenticate(auth)
-                        try {
-                            (session.connectShare(target.share) as DiskShare).use { disk ->
-                                block(OpenShare(disk, conn))
-                            }
-                        } finally {
-                            runCatching { session.close() }
-                        }
+        try {
+            coroutineScope {
+                val open = AtomicReference<Connection?>()
+                val finished = AtomicBoolean(false)
+                val closer = launch {
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        if (!finished.get()) runCatching { open.get()?.close(true) }
                     }
                 }
-            } catch (e: SmbFailureException) {
-                throw e
-            } catch (e: Exception) {
-                throw SmbFailureException(SmbFailure.classify(e), e)
+                try {
+                    runInterruptible(Dispatchers.IO) {
+                        SMBClient(config).use { client ->
+                            client.connect(target.host, target.port).use { conn ->
+                                open.set(conn)
+                                val auth = if (target.username.isBlank()) {
+                                    AuthenticationContext.guest()
+                                } else {
+                                    AuthenticationContext(target.username, target.passwordChars(), null)
+                                }
+                                val session = conn.authenticate(auth)
+                                try {
+                                    (session.connectShare(target.share) as DiskShare).use { disk ->
+                                        block(OpenShare(disk, conn))
+                                    }
+                                } finally {
+                                    runCatching { session.close() }
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    finished.set(true)
+                    closer.cancel()
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SmbFailureException) {
+            throw e
+        } catch (e: Exception) {
+            // An interrupted smbj call surfaces as its own exception type; if we were
+            // cancelled, report that rather than a made-up SMB error.
+            currentCoroutineContext().ensureActive()
+            throw SmbFailureException(SmbFailure.classify(e), e)
         }
 
     /** An open share plus a way to tell a dead connection from a one-file failure. */

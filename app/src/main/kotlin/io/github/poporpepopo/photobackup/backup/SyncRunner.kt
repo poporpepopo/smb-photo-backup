@@ -14,7 +14,11 @@ import io.github.poporpepopo.photobackup.smb.SmbGateway
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.job
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.time.ZoneId
@@ -26,7 +30,20 @@ data class SyncProgress(
     val name: String,
     val sent: Long,
     val size: Long,
-)
+) {
+    /** Whole-pass progress in 0..1, counting the current file by its bytes. */
+    val overall: Float
+        get() = (index + if (size > 0) sent.toFloat() / size else 1f) / total
+}
+
+sealed interface RunState {
+    data object Idle : RunState
+
+    /** Checking settings, the router and what is pending. */
+    data object Preparing : RunState
+
+    data class Sending(val progress: SyncProgress) : RunState
+}
 
 data class ItemError(val name: String, val detail: String)
 
@@ -68,6 +85,13 @@ class SyncRunner(
     private val zone: () -> ZoneId = ZoneId::systemDefault,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    // The periodic job and "Sync now" are separate WorkManager jobs and can overlap. Two
+    // passes would race on the same temporary file names, so only one runs at a time.
+    private val lock = Mutex()
+    private val _state = MutableStateFlow<RunState>(RunState.Idle)
+
+    /** What the pass in progress (if any) is doing, for the screen and the notification. */
+    val state: StateFlow<RunState> = _state.asStateFlow()
 
     /** Items still to send under the current settings. Reads only; no network. */
     suspend fun pending(includeVideos: Boolean): Pair<Int, Int> = withContext(Dispatchers.IO) {
@@ -77,7 +101,19 @@ class SyncRunner(
         (items.size - pending.size) to pending.size
     }
 
-    suspend fun run(onProgress: (SyncProgress) -> Unit = {}): SyncOutcome {
+    /** One backup pass, or null if another pass is already running. */
+    suspend fun run(): SyncOutcome? {
+        if (!lock.tryLock()) return null
+        try {
+            _state.value = RunState.Preparing
+            return runPass()
+        } finally {
+            _state.value = RunState.Idle
+            lock.unlock()
+        }
+    }
+
+    private suspend fun runPass(): SyncOutcome {
         val ready = when (val t = settings.target()) {
             is TargetResult.Ready -> t
             TargetResult.NotConfigured -> return SyncOutcome.NotReady(NotReadyReason.NotConfigured)
@@ -98,34 +134,41 @@ class SyncRunner(
         }
         if (pending.isEmpty()) return SyncOutcome.Finished(SyncSummary())
 
-        val job = currentCoroutineContext().job
         var summary = SyncSummary()
         try {
-            SmbGateway.withShare(ready.target) { share ->
-                val uploader = Uploader(share.disk)
-                for ((index, item) in pending.withIndex()) {
-                    if (!job.isActive) break
-                    val name = Destination.sanitizeFileName(item.displayName, "media_${item.id}")
-                    try {
-                        val result = sendOne(uploader, item, name, s.folder) { sent, size ->
-                            onProgress(SyncProgress(index, pending.size, name, sent, size))
+            withStallGuard(STALL_LIMIT_MS) { touch ->
+                val job = currentCoroutineContext().job
+                SmbGateway.withShare(ready.target) { share ->
+                    val uploader = Uploader(share.disk, onActivity = touch)
+                    for ((index, item) in pending.withIndex()) {
+                        if (!job.isActive) break
+                        touch()
+                        val name = Destination.sanitizeFileName(item.displayName, "media_${item.id}")
+                        try {
+                            val result = sendOne(uploader, item, name, s.folder) { sent, size ->
+                                _state.value = RunState.Sending(
+                                    SyncProgress(index, pending.size, name, sent, size),
+                                )
+                            }
+                            dao.upsert(
+                                UploadedRecord(item.id, item.size, item.dateModifiedSeconds, result.path, clock()),
+                            )
+                            summary = when (result) {
+                                is UploadResult.Uploaded -> summary.copy(uploaded = summary.uploaded + 1)
+                                is UploadResult.AlreadyPresent ->
+                                    summary.copy(alreadyPresent = summary.alreadyPresent + 1)
+                            }
+                        } catch (e: Exception) {
+                            // Cancelled (interrupted mid-call) or a dead connection ends the
+                            // pass; anything else is this file's problem (deleted meanwhile,
+                            // a name the server rejects, ...).
+                            if (!job.isActive) throw e
+                            if (e !is LocalReadException && !share.isAlive) throw e
+                            summary = summary.copy(
+                                failed = summary.failed + 1,
+                                lastItemError = ItemError(name, describe(e)),
+                            )
                         }
-                        dao.upsert(
-                            UploadedRecord(item.id, item.size, item.dateModifiedSeconds, result.path, clock()),
-                        )
-                        summary = when (result) {
-                            is UploadResult.Uploaded -> summary.copy(uploaded = summary.uploaded + 1)
-                            is UploadResult.AlreadyPresent ->
-                                summary.copy(alreadyPresent = summary.alreadyPresent + 1)
-                        }
-                    } catch (e: Exception) {
-                        // A dead connection ends the pass; anything else is this file's
-                        // problem (deleted meanwhile, a name the server rejects, ...).
-                        if (e !is LocalReadException && !share.isAlive) throw e
-                        summary = summary.copy(
-                            failed = summary.failed + 1,
-                            lastItemError = ItemError(name, describe(e)),
-                        )
                     }
                 }
             }
@@ -159,6 +202,11 @@ class SyncRunner(
     private fun describe(e: Throwable): String = when (val f = SmbFailure.classify(e)) {
         is SmbFailure.Other -> f.detail
         else -> f.toString()
+    }
+
+    private companion object {
+        /** Longer than smbj's own request timeouts (30–60 s), so those fire first. */
+        const val STALL_LIMIT_MS = 2 * 60_000L
     }
 }
 

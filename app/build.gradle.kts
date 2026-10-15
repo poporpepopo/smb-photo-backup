@@ -82,6 +82,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.work.runtime.ktx)
 
     // SMB2/3 client. smbj logs through slf4j; with no slf4j provider on the classpath
     // those logs go nowhere, which also keeps protocol details out of logcat.
@@ -91,4 +92,5 @@ dependencies {
     implementation(libs.bouncycastle)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

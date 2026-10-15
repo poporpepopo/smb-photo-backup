@@ -66,4 +66,13 @@
     <string name="sync_summary">送信 %1$d 件・既にあり %2$d 件・失敗 %3$d 件</string>
     <string name="sync_item_error">%1$s を送れませんでした：%2$s</string>
     <string name="sync_not_home">ルーターに届きません。家のWi-Fiにつながっていますか？</string>
+    <string name="notif_channel_sync">バックアップの進捗</string>
+    <string name="notif_sync_title">写真をバックアップしています</string>
+    <string name="notif_permission_title">通知</string>
+    <string name="notif_permission_text">通知を許可すると、時間のかかる送信の進捗が通知に出ます。許可しなくてもバックアップは行われます。</string>
+    <string name="button_allow_notifications">通知を許可</string>
+    <string name="sync_last_success">最終同期：%1$s</string>
+    <string name="sync_never">まだ同期していません。</string>
+    <string name="sync_last_run">前回の実行（%1$s）</string>
+    <string name="sync_queued">開始を待っています…</string>
 </resources>

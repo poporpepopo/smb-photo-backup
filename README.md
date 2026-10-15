@@ -34,7 +34,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | `backup/Uploader.kt` | 一時ファイルに書く → サーバー上のサイズを確認 → 上書き禁止でリネーム |
 | `backup/UploadDatabase.kt` | 送信済みの記録（Room）。MediaStore の ID・サイズ・更新日時と、共有上のパス |
 | `backup/SyncPlanner.kt` | 送信済み判定。サイズか更新日時が変わっていれば編集されたとみなして再送 |
-| `backup/SyncRunner.kt` | 1回の同期。未送信を新しい順に1本の接続で送り、1件ごとに記録する |
+| `backup/SyncRunner.kt` | 1回の同期。未送信を新しい順に1本の接続で送り、1件ごとに記録する。同時には1つしか動かない |
+| `backup/StallGuard.kt` | データの動きが2分止まったら打ち切る。smbj のタイムアウトが効かない止まり方への備え |
+| `sync/SyncScheduler.kt` | 15分ごとの定期ジョブ（従量制でない回線、設定により充電中のみ）と「今すぐ同期」 |
+| `sync/SyncWorker.kt` | WorkManager から1回の同期を呼ぶ。送るものがあればフォアグラウンドに切り替えて進捗を通知 |
+| `sync/SyncStatusStore.kt` | 最終同期の日時、前回の結果、直近のエラーの保存 |
 | `ui/` | ホーム画面（権限・件数・今すぐ同期）と設定画面 |
 
 ### 同期中のエラーの扱い
@@ -42,6 +46,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - 接続が切れたら（ルーターの再起動、Wi-Fi 切断など）その回は中断。送れた分は記録済みなので、次の回は続きから
 - 接続が生きたままの失敗（その1件が読めない、共有側で名前がぶつかって作れない等）は、その1件だけ失敗として数えて残りを続ける
 - 送信済みの記録は1件送るごとに書くので、途中でアプリが終了しても失うのは送信中の1件だけ
+- 定期実行は、ルーターに届かない（家にいない）、設定が無い、接続が切れた、のどれでも「成功」で終える。再試行は WorkManager に任せず、次の15分後の回で続きを送る
+
+懸念点・確認点は [docs/open-issues.md](docs/open-issues.md) にまとめています。
 
 バックアップと機種変更時の転送はどちらも無効にしています。暗号化したパスワードは
 この端末の Keystore 鍵でしか復号できず、移しても使えないためです。

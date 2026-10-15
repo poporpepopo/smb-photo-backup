@@ -40,7 +40,11 @@ class LocalFile(
  * If the connection drops mid-way, at worst a ".photobackup-<id>.part" file is left
  * behind; the retry overwrites it.
  */
-class Uploader(private val share: DiskShare) {
+class Uploader(
+    private val share: DiskShare,
+    /** Called whenever bytes move, so a caller can tell a slow transfer from a hung one. */
+    private val onActivity: () -> Unit = {},
+) {
 
     fun upload(
         local: LocalFile,
@@ -48,7 +52,7 @@ class Uploader(private val share: DiskShare) {
         onProgress: (sent: Long, total: Long) -> Unit = { _, _ -> },
     ): UploadResult {
         mkdirs(directory)
-        val dir = ShareDirectory(share, directory, local)
+        val dir = ShareDirectory(share, directory, local, onActivity)
 
         var resolution = NameResolver.resolve(dir, local.name, local.size)
         if (resolution is NameResolution.AlreadyPresent) {
@@ -123,6 +127,7 @@ class Uploader(private val share: DiskShare) {
                         if (n < 0) break
                         out.write(buf, 0, n)
                         sent += n
+                        onActivity()
                         onProgress(sent, local.size)
                     }
                 }
@@ -169,6 +174,7 @@ private class ShareDirectory(
     private val share: DiskShare,
     private val directory: String,
     private val local: LocalFile,
+    private val onActivity: () -> Unit,
 ) : RemoteDirectory {
 
     private fun smbPath(name: String) =
@@ -191,7 +197,9 @@ private class ShareDirectory(
             // Not file.inputStream: it reads ahead past the end of the file, and some
             // servers answer that read with a reply smbj cannot parse. We know the size,
             // so read exactly that much with positional reads.
-            val remote = BoundedInputStream(local.size) { buf, at, off, len -> file.read(buf, at, off, len) }
+            val remote = BoundedInputStream(local.size) { buf, at, off, len ->
+                file.read(buf, at, off, len).also { onActivity() }
+            }
             local.open().use { mine -> streamsEqual(remote, mine) }
         }
 }

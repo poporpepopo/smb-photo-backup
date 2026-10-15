@@ -1,13 +1,18 @@
 package io.github.poporpepopo.photobackup.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.poporpepopo.photobackup.PhotoBackupApp
-import io.github.poporpepopo.photobackup.backup.SyncOutcome
-import io.github.poporpepopo.photobackup.backup.SyncProgress
+import io.github.poporpepopo.photobackup.backup.RunState
 import io.github.poporpepopo.photobackup.media.MediaAccess
 import io.github.poporpepopo.photobackup.media.MediaPermissionState
 import io.github.poporpepopo.photobackup.media.MediaPermissions
+import io.github.poporpepopo.photobackup.sync.SyncScheduler
+import io.github.poporpepopo.photobackup.sync.SyncStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,18 +23,16 @@ import kotlinx.coroutines.launch
 
 data class HomeState(
     val permission: MediaPermissionState? = null,
+    val notificationsAllowed: Boolean = true,
     val includeVideos: Boolean = true,
     val uploadedCount: Int? = null,
     val pendingCount: Int? = null,
-    val sync: SyncUiState = SyncUiState.Idle,
+    /** The pass in progress, whether started here or by the periodic job. */
+    val run: RunState = RunState.Idle,
+    /** "Sync now" was pressed and is waiting for WorkManager to start it. */
+    val queued: Boolean = false,
+    val status: SyncStatus = SyncStatus(),
 )
-
-sealed interface SyncUiState {
-    data object Idle : SyncUiState
-    /** [progress] is null while connecting and listing. */
-    data class Running(val progress: SyncProgress?) : SyncUiState
-    data class Done(val outcome: SyncOutcome) : SyncUiState
-}
 
 class HomeViewModel(private val app: PhotoBackupApp) : ViewModel() {
 
@@ -43,12 +46,28 @@ class HomeViewModel(private val app: PhotoBackupApp) : ViewModel() {
                 refresh()
             }
         }
+        viewModelScope.launch {
+            app.syncRunner.state.collect { run ->
+                val finished = run == RunState.Idle && _state.value.run != RunState.Idle
+                _state.update { it.copy(run = run) }
+                if (finished) refresh()
+            }
+        }
+        viewModelScope.launch {
+            app.syncStatus.status.collect { s -> _state.update { it.copy(status = s) } }
+        }
+        viewModelScope.launch {
+            SyncScheduler.manualQueued(app).collect { q -> _state.update { it.copy(queued = q) } }
+        }
     }
 
     /** Re-reads permissions and counts; called on resume and after a permission request. */
     fun refresh() {
         val permission = MediaPermissions.state(app, _state.value.includeVideos)
-        _state.update { it.copy(permission = permission) }
+        val notifications = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        _state.update { it.copy(permission = permission, notificationsAllowed = notifications) }
         if (permission.access == MediaAccess.None) {
             _state.update { it.copy(uploadedCount = null, pendingCount = null) }
             return
@@ -60,14 +79,7 @@ class HomeViewModel(private val app: PhotoBackupApp) : ViewModel() {
     }
 
     fun syncNow() {
-        if (_state.value.sync is SyncUiState.Running) return
-        _state.update { it.copy(sync = SyncUiState.Running(null)) }
-        viewModelScope.launch {
-            val outcome = app.syncRunner.run { p ->
-                _state.update { it.copy(sync = SyncUiState.Running(p)) }
-            }
-            _state.update { it.copy(sync = SyncUiState.Done(outcome)) }
-            refresh()
-        }
+        if (_state.value.run != RunState.Idle) return
+        SyncScheduler.syncNow(app)
     }
 }
