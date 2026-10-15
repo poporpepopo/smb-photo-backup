@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">写真バックアップ</string>
+    <string name="settings_title">設定</string>
+
+    <string name="field_host">ルーターのIPアドレス</string>
+    <string name="field_share">共有名</string>
+    <string name="field_folder">保存フォルダ</string>
+    <string name="field_folder_hint">例: Backup/Pixel（空欄なら共有の直下）</string>
+    <string name="field_user">ユーザー名</string>
+    <string name="field_password">パスワード</string>
+    <string name="password_saved_hint">保存済み（変更するときだけ入力）</string>
+    <string name="password_show">表示</string>
+    <string name="password_hide">隠す</string>
+
+    <string name="switch_include_videos">動画もバックアップする</string>
+    <string name="switch_charging_only">充電中のみ実行する</string>
+
+    <string name="button_save">保存</string>
+    <string name="button_test">接続テスト</string>
+    <string name="saved">保存しました</string>
+
+    <string name="test_running">接続しています…</string>
+    <string name="test_ok">//%1$s/%2$s に接続できました</string>
+    <string name="test_share_entries">共有内のフォルダ：</string>
+    <string name="test_share_empty">（フォルダはありません）</string>
+    <string name="test_folder_exists">保存フォルダ「%1$s」はあります。</string>
+    <string name="test_folder_missing">保存フォルダ「%1$s」はまだありません。最初の送信時に作成します。</string>
+
+    <string name="error_host_required">ルーターのIPアドレスを入力してください</string>
+    <string name="error_share_required">共有名を入力してください</string>
+    <string name="error_unreachable">%1$s の445番ポートに届きません。家のWi-Fiにつながっているか、IPアドレスが正しいか確認してください。</string>
+    <string name="error_timeout">ルーターから時間内に応答がありませんでした。</string>
+    <string name="error_auth">ユーザー名かパスワードが違います。</string>
+    <string name="error_share_not_found">その名前の共有はありません。</string>
+    <string name="error_access_denied">このユーザーには共有へのアクセス権がありません。</string>
+    <string name="error_password_unreadable">保存済みのパスワードを読み出せません。もう一度入力してください。</string>
+    <string name="error_other">接続に失敗しました：%1$s</string>
+</resources>

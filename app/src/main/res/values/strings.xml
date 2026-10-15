@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Photo Backup</string>
+    <string name="settings_title">Settings</string>
+
+    <string name="field_host">Router IP address</string>
+    <string name="field_share">Share name</string>
+    <string name="field_folder">Destination folder</string>
+    <string name="field_folder_hint">e.g. Backup/Pixel (blank = share root)</string>
+    <string name="field_user">User name</string>
+    <string name="field_password">Password</string>
+    <string name="password_saved_hint">Saved — type only to change it</string>
+    <string name="password_show">Show</string>
+    <string name="password_hide">Hide</string>
+
+    <string name="switch_include_videos">Back up videos</string>
+    <string name="switch_charging_only">Only while charging</string>
+
+    <string name="button_save">Save</string>
+    <string name="button_test">Test connection</string>
+    <string name="saved">Saved</string>
+
+    <string name="test_running">Connecting…</string>
+    <string name="test_ok">Connected to //%1$s/%2$s</string>
+    <string name="test_share_entries">Folders in the share:</string>
+    <string name="test_share_empty">(no folders)</string>
+    <string name="test_folder_exists">Destination folder \"%1$s\" exists.</string>
+    <string name="test_folder_missing">Destination folder \"%1$s\" does not exist yet. It will be created on the first upload.</string>
+
+    <string name="error_host_required">Enter the router\'s IP address</string>
+    <string name="error_share_required">Enter the share name</string>
+    <string name="error_unreachable">Cannot reach port 445 on %1$s. Check that you are on your home Wi-Fi and that the IP address is right.</string>
+    <string name="error_timeout">The router did not answer in time.</string>
+    <string name="error_auth">Wrong user name or password.</string>
+    <string name="error_share_not_found">There is no share with that name.</string>
+    <string name="error_access_denied">This user is not allowed to access the share.</string>
+    <string name="error_password_unreadable">The saved password can no longer be read. Please enter it again.</string>
+    <string name="error_other">Connection failed: %1$s</string>
+</resources>
