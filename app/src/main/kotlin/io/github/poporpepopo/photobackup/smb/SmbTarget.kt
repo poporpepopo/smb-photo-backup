@@ -6,6 +6,8 @@ class SmbTarget(
     val share: String,
     val username: String,
     private val password: String,
+    /** Always 445 in the app; tests point it at a local server on an unprivileged port. */
+    val port: Int = HostProbe.SMB_PORT,
 ) {
     internal fun passwordChars(): CharArray = password.toCharArray()
 

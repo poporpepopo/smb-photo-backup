@@ -14,7 +14,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-実機での確認手順は [docs/device-testing.md](docs/device-testing.md)。
+実機での確認手順と、ルーターなしでの試し方は [docs/device-testing.md](docs/device-testing.md)。
 
 ## 構成
 
@@ -26,7 +26,13 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | `smb/HostProbe.kt` | 445番ポートへの短いタイムアウトでの接続。「家にいるか」の判定にも使う |
 | `smb/SmbFailure.kt` | smbj の例外を、利用者が対処できる粒度に分類 |
 | `smb/RemotePath.kt` | 共有内のパスは `/` 区切りで持ち、smbj に渡す直前だけ `\` に変える |
-| `ui/` | 設定画面 |
+| `smb/ShareStat.kt` | 1往復で種類とサイズを取る存在確認。サーバーごとに違う「無い」の返し方をまとめて扱う |
+| `media/MediaStoreSource.kt` | 写真・動画の一覧と、GPS を削られていない元データの読み出し（読み取り専用） |
+| `media/MediaPermissions.kt` | 全件・限定（Android 14+）・なし の判定と、要求する権限の一覧 |
+| `backup/Destination.kt` | 保存先 `<フォルダ>/年/月`、ファイル名の無害化、`名前 (n).拡張子` の連番 |
+| `backup/NameResolver.kt` | 同名があれば中身を比べ、同じなら送信済み、違えば次の連番 |
+| `backup/Uploader.kt` | 一時ファイルに書く → サーバー上のサイズを確認 → 上書き禁止でリネーム |
+| `ui/` | ホーム画面（権限・件数・1件送信のテスト）と設定画面 |
 
 バックアップと機種変更時の転送はどちらも無効にしています。暗号化したパスワードは
 この端末の Keystore 鍵でしか復号できず、移しても使えないためです。

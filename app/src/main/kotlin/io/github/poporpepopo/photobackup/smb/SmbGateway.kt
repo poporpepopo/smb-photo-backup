@@ -33,7 +33,7 @@ object SmbGateway {
         withContext(Dispatchers.IO) {
             try {
                 SMBClient(config).use { client ->
-                    client.connect(target.host).use { conn ->
+                    client.connect(target.host, target.port).use { conn ->
                         val auth = if (target.username.isBlank()) {
                             AuthenticationContext.guest()
                         } else {
@@ -69,7 +69,7 @@ object SmbGateway {
                 }
                 .map { it.fileName }
                 .sortedWith(String.CASE_INSENSITIVE_ORDER)
-            val exists = folder.isEmpty() || share.folderExists(RemotePath.toSmb(folder))
+            val exists = folder.isEmpty() || share.stat(RemotePath.toSmb(folder))?.isDirectory == true
             ShareListing(folders, exists)
         }
 }

@@ -32,6 +32,15 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests.all { test ->
+            // SmbIntegrationTest runs only when these point at a test SMB server.
+            listOf("SMB_TEST_PORT", "SMB_TEST_ROOT").forEach { name ->
+                providers.environmentVariable(name).orNull?.let { test.environment(name, it) }
+            }
+        }
+    }
+
     packaging {
         resources {
             excludes += setOf(
@@ -59,6 +68,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)

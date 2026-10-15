@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.poporpepopo.photobackup.smb.RemotePath
+import io.github.poporpepopo.photobackup.smb.SmbTarget
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -31,6 +32,12 @@ sealed interface StoredPassword {
     class Available(val value: String) : StoredPassword {
         override fun toString() = "Available(***)"
     }
+}
+
+sealed interface TargetResult {
+    class Ready(val settings: BackupSettings, val target: SmbTarget) : TargetResult
+    data object NotConfigured : TargetResult
+    data object PasswordUnreadable : TargetResult
 }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -58,6 +65,19 @@ class SettingsRepository(
     suspend fun password(): StoredPassword {
         val enc = store.data.first()[PASSWORD_ENC] ?: return StoredPassword.None
         return cipher.decrypt(enc)?.let(StoredPassword::Available) ?: StoredPassword.Unreadable
+    }
+
+    /** The saved settings turned into something to connect to. */
+    suspend fun target(): TargetResult {
+        val s = current()
+        if (s.host.isBlank() || s.share.isBlank()) return TargetResult.NotConfigured
+        val password = when (val p = password()) {
+            is StoredPassword.Available -> p.value
+            StoredPassword.None -> ""
+            StoredPassword.Unreadable ->
+                if (s.username.isBlank()) "" else return TargetResult.PasswordUnreadable
+        }
+        return TargetResult.Ready(s, SmbTarget(s.host, s.share, s.username, password))
     }
 
     /** Saves [s]. A null or empty [newPassword] keeps the stored one. */

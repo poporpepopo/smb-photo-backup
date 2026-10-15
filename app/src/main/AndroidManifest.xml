@@ -5,6 +5,19 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Reading photos and videos. Android 13+ splits media by type; 12 and lower use the
+         old storage permission. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <!-- Declared so Android 14+ reports "selected photos only" as its own state instead of
+         temporarily granting READ_MEDIA_IMAGES for the picked items. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Lets MediaStore.setRequireOriginal hand us photos with their GPS tags intact. -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+
     <!-- Backup and device transfer are off: the password is encrypted with a Keystore key
          that never leaves this device, so a restored copy could not be decrypted anyway.
          allowBackup covers Android 11 and lower, dataExtractionRules 12 and higher. -->

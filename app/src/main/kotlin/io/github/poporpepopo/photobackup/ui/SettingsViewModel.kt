@@ -41,13 +41,6 @@ data class SettingsForm(
     override fun toString() = "SettingsForm(//$host/$share/$folder as $username)"
 }
 
-sealed interface FormError {
-    data object HostRequired : FormError
-    data object ShareRequired : FormError
-    data object PasswordUnreadable : FormError
-    data class Smb(val failure: SmbFailure) : FormError
-}
-
 sealed interface TestState {
     data object Idle : TestState
     data object Running : TestState
@@ -58,7 +51,7 @@ sealed interface TestState {
         val folders: List<String>,
         val folderExists: Boolean,
     ) : TestState
-    data class Failed(val error: FormError, val host: String) : TestState
+    data class Failed(val error: UiError, val host: String) : TestState
 }
 
 class SettingsViewModel(private val repo: SettingsRepository) : ViewModel() {
@@ -116,18 +109,18 @@ class SettingsViewModel(private val repo: SettingsRepository) : ViewModel() {
         val host = f.host.trim()
         val share = f.share.trim()
         val folder = RemotePath.normalizeFolder(f.folder)
-        fun fail(e: FormError) = TestState.Failed(e, host)
+        fun fail(e: UiError) = TestState.Failed(e, host)
 
-        if (host.isEmpty()) return fail(FormError.HostRequired)
-        if (share.isEmpty()) return fail(FormError.ShareRequired)
-        val password = resolvePassword(f) ?: return fail(FormError.PasswordUnreadable)
-        if (!HostProbe.isReachable(host)) return fail(FormError.Smb(SmbFailure.Unreachable))
+        if (host.isEmpty()) return fail(UiError.HostRequired)
+        if (share.isEmpty()) return fail(UiError.ShareRequired)
+        val password = resolvePassword(f) ?: return fail(UiError.PasswordUnreadable)
+        if (!HostProbe.isReachable(host)) return fail(UiError.Smb(SmbFailure.Unreachable))
         return try {
             val target = SmbTarget(host, share, f.username.trim(), password)
             val listing = SmbGateway.probeShare(target, folder)
             TestState.Success(host, share, folder, listing.folders, listing.destinationExists)
         } catch (e: SmbFailureException) {
-            fail(FormError.Smb(e.failure))
+            fail(UiError.Smb(e.failure))
         }
     }
 

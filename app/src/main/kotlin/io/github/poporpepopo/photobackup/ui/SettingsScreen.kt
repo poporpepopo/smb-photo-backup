@@ -17,21 +17,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -50,74 +45,65 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.poporpepopo.photobackup.PhotoBackupApp
 import io.github.poporpepopo.photobackup.R
-import io.github.poporpepopo.photobackup.smb.SmbFailure
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
     val app = LocalContext.current.applicationContext as PhotoBackupApp
     val vm: SettingsViewModel = viewModel(
         factory = viewModelFactory { initializer { SettingsViewModel(app.settings) } },
     )
     val form by vm.form.collectAsStateWithLifecycle()
     val test by vm.test.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val savedText = stringResource(R.string.saved)
 
-    Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }) },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { padding ->
-        if (!form.loaded) return@Scaffold
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Field(
-                value = form.host,
-                label = R.string.field_host,
-                keyboardType = KeyboardType.Uri,
-                placeholder = "192.168.50.1",
-            ) { v -> vm.edit { it.copy(host = v) } }
-            Field(form.share, R.string.field_share) { v -> vm.edit { it.copy(share = v) } }
-            Field(
-                value = form.folder,
-                label = R.string.field_folder,
-                placeholder = stringResource(R.string.field_folder_hint),
-            ) { v -> vm.edit { it.copy(folder = v) } }
-            Field(form.username, R.string.field_user) { v -> vm.edit { it.copy(username = v) } }
-            PasswordField(
-                value = form.newPassword,
-                hasSaved = form.hasSavedPassword,
-            ) { v -> vm.edit { it.copy(newPassword = v) } }
+    if (!form.loaded) return
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Field(
+            value = form.host,
+            label = R.string.field_host,
+            keyboardType = KeyboardType.Uri,
+            placeholder = "192.168.50.1",
+        ) { v -> vm.edit { it.copy(host = v) } }
+        Field(form.share, R.string.field_share) { v -> vm.edit { it.copy(share = v) } }
+        Field(
+            value = form.folder,
+            label = R.string.field_folder,
+            placeholder = stringResource(R.string.field_folder_hint),
+        ) { v -> vm.edit { it.copy(folder = v) } }
+        Field(form.username, R.string.field_user) { v -> vm.edit { it.copy(username = v) } }
+        PasswordField(
+            value = form.newPassword,
+            hasSaved = form.hasSavedPassword,
+        ) { v -> vm.edit { it.copy(newPassword = v) } }
 
-            SwitchRow(R.string.switch_include_videos, form.includeVideos) { v ->
-                vm.edit { it.copy(includeVideos = v) }
-            }
-            SwitchRow(R.string.switch_charging_only, form.chargingOnly) { v ->
-                vm.edit { it.copy(chargingOnly = v) }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = {
-                    vm.save { scope.launch { snackbar.showSnackbar(savedText) } }
-                }) { Text(stringResource(R.string.button_save)) }
-                OutlinedButton(
-                    onClick = vm::testConnection,
-                    enabled = test != TestState.Running,
-                ) { Text(stringResource(R.string.button_test)) }
-            }
-
-            TestResult(test)
-            Spacer(Modifier.size(24.dp))
+        SwitchRow(R.string.switch_include_videos, form.includeVideos) { v ->
+            vm.edit { it.copy(includeVideos = v) }
         }
+        SwitchRow(R.string.switch_charging_only, form.chargingOnly) { v ->
+            vm.edit { it.copy(chargingOnly = v) }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = {
+                vm.save { scope.launch { snackbar.showSnackbar(savedText) } }
+            }) { Text(stringResource(R.string.button_save)) }
+            OutlinedButton(
+                onClick = vm::testConnection,
+                enabled = test != TestState.Running,
+            ) { Text(stringResource(R.string.button_test)) }
+        }
+
+        TestResult(test)
+        Spacer(Modifier.size(24.dp))
     }
 }
 
@@ -234,20 +220,5 @@ private fun ResultCard(error: Boolean, content: @Composable () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) { content() }
-    }
-}
-
-@Composable
-private fun errorText(e: FormError, host: String): String = when (e) {
-    FormError.HostRequired -> stringResource(R.string.error_host_required)
-    FormError.ShareRequired -> stringResource(R.string.error_share_required)
-    FormError.PasswordUnreadable -> stringResource(R.string.error_password_unreadable)
-    is FormError.Smb -> when (val f = e.failure) {
-        SmbFailure.Unreachable -> stringResource(R.string.error_unreachable, host)
-        SmbFailure.Timeout -> stringResource(R.string.error_timeout)
-        SmbFailure.AuthFailed -> stringResource(R.string.error_auth)
-        SmbFailure.ShareNotFound -> stringResource(R.string.error_share_not_found)
-        SmbFailure.AccessDenied -> stringResource(R.string.error_access_denied)
-        is SmbFailure.Other -> stringResource(R.string.error_other, f.detail)
     }
 }
