@@ -8,10 +8,12 @@ import io.github.poporpepopo.photobackup.media.MediaStoreSource
 import io.github.poporpepopo.photobackup.settings.SettingsRepository
 import io.github.poporpepopo.photobackup.settings.TargetResult
 import io.github.poporpepopo.photobackup.smb.HostProbe
+import io.github.poporpepopo.photobackup.smb.LocalNetworkAccess
 import io.github.poporpepopo.photobackup.smb.SmbFailure
 import io.github.poporpepopo.photobackup.smb.SmbFailureException
 import io.github.poporpepopo.photobackup.smb.SmbGateway
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +23,9 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.time.YearMonth
 import java.time.ZoneId
+import java.util.UUID
 
 data class SyncProgress(
     /** 0-based index of the item being sent, out of [total]. */
@@ -67,7 +71,7 @@ sealed interface SyncOutcome {
     data class Aborted(val failure: SmbFailure, val summary: SyncSummary) : SyncOutcome
 }
 
-enum class NotReadyReason { NoPermission, NotConfigured, PasswordUnreadable }
+enum class NotReadyReason { NoPermission, NoLocalNetwork, NotConfigured, PasswordUnreadable }
 
 /** Thrown when the phone-side file cannot be read, so it can be told apart from SMB errors. */
 class LocalReadException(cause: Throwable) : IOException(cause.message, cause)
@@ -81,6 +85,7 @@ class SyncRunner(
     private val context: Context,
     private val settings: SettingsRepository,
     private val dao: UploadedDao,
+    private val partials: PartialUploadDao,
     private val media: MediaStoreSource = MediaStoreSource(context),
     private val zone: () -> ZoneId = ZoneId::systemDefault,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -125,21 +130,38 @@ class SyncRunner(
         if (permission.access == MediaAccess.None || !permission.location) {
             return SyncOutcome.NotReady(NotReadyReason.NoPermission)
         }
+        if (!LocalNetworkAccess.granted(context)) {
+            return SyncOutcome.NotReady(NotReadyReason.NoLocalNetwork)
+        }
         if (!HostProbe.isReachable(s.host)) return SyncOutcome.NotHome
+        val target = ready.target
 
         val pending = withContext(Dispatchers.IO) {
             val items = media.query(s.includeVideos)
             val records = dao.all().associate { it.mediaId to it.version }
             SyncPlanner.pending(items, records, MediaItem::version)
         }
-        if (pending.isEmpty()) return SyncOutcome.Finished(SyncSummary())
+        val leftovers = withContext(Dispatchers.IO) { partials.all() }
+        if (pending.isEmpty() && leftovers.isEmpty()) return SyncOutcome.Finished(SyncSummary())
 
         var summary = SyncSummary()
+        var seenServerId: UUID? = null
         try {
             withStallGuard(STALL_LIMIT_MS) { touch ->
                 val job = currentCoroutineContext().job
-                SmbGateway.withShare(ready.target) { share ->
-                    val uploader = Uploader(share.disk, onActivity = touch)
+                SmbGateway.withShare(target) { share ->
+                    seenServerId = share.serverId
+                    val uploader = Uploader(share.disk, onActivity = touch, temps = tempRecords)
+                    // Leftovers of interrupted uploads. A retry of the same item would reuse
+                    // its .part anyway, but not if the item was deleted from the phone,
+                    // excluded (videos switched off) or now goes to another month folder.
+                    for (path in leftovers) {
+                        if (!job.isActive) break
+                        touch()
+                        if (runCatching { uploader.removeLeftover(path) }.getOrDefault(false)) {
+                            partials.remove(path)
+                        }
+                    }
                     for ((index, item) in pending.withIndex()) {
                         if (!job.isActive) break
                         touch()
@@ -164,6 +186,10 @@ class SyncRunner(
                             // a name the server rejects, ...).
                             if (!job.isActive) throw e
                             if (e !is LocalReadException && !share.isAlive) throw e
+                            // A full disk fails every remaining item; stop and say so once.
+                            if (SmbFailure.classify(e) == SmbFailure.DiskFull) {
+                                throw SmbFailureException(SmbFailure.DiskFull, e)
+                            }
                             summary = summary.copy(
                                 failed = summary.failed + 1,
                                 lastItemError = ItemError(name, describe(e)),
@@ -174,9 +200,21 @@ class SyncRunner(
             }
         } catch (e: SmbFailureException) {
             return SyncOutcome.Aborted(e.failure, summary)
+        } finally {
+            // Settings saved before server IDs were remembered: trust the first server we
+            // log in to, as the connection test would have.
+            val id = seenServerId
+            if (id != null && target.expectedServerId == null) {
+                withContext(NonCancellable) { settings.rememberServer(s.host, id) }
+            }
         }
         currentCoroutineContext().ensureActive()
         return SyncOutcome.Finished(summary)
+    }
+
+    private val tempRecords = object : TempFiles {
+        override fun created(path: String) = partials.add(PartialUpload(path))
+        override fun removed(path: String) = partials.remove(path)
     }
 
     private fun sendOne(
@@ -188,8 +226,20 @@ class SyncRunner(
     ): UploadResult {
         val size = local { media.originalSize(item) }
         val file = LocalFile(item.id, name, size) { local { media.openOriginal(item) } }
-        val directory = Destination.directory(folder, item.dateTakenMillis, item.dateAddedSeconds, zone())
+        val directory = Destination.directory(
+            folder,
+            item.dateTakenMillis,
+            item.dateAddedSeconds,
+            zone(),
+            exifMonth = exifMonth(item),
+        )
         return uploader.upload(file, directory, onProgress)
+    }
+
+    /** Only asked when MediaStore has no capture time; an unreadable EXIF just falls back. */
+    private fun exifMonth(item: MediaItem): YearMonth? {
+        if (item.isVideo || item.dateTakenMillis != null) return null
+        return runCatching { Destination.exifYearMonth(media.exifCaptureDate(item)) }.getOrNull()
     }
 
     private inline fun <T> local(read: () -> T): T =

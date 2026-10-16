@@ -29,6 +29,17 @@ class LocalFile(
     val open: () -> InputStream,
 )
 
+/** Told when a temporary file may be left on the share and when it is gone again. */
+interface TempFiles {
+    fun created(path: String)
+    fun removed(path: String)
+
+    object Untracked : TempFiles {
+        override fun created(path: String) {}
+        override fun removed(path: String) {}
+    }
+}
+
 /**
  * Writes one file to the share so that the final name only ever holds a complete copy:
  *
@@ -38,12 +49,13 @@ class LocalFile(
  * 4. rename it to the chosen name, refusing to overwrite
  *
  * If the connection drops mid-way, at worst a ".photobackup-<id>.part" file is left
- * behind; the retry overwrites it.
+ * behind. [temps] hears about it so a later pass can remove it with [removeLeftover].
  */
 class Uploader(
     private val share: DiskShare,
     /** Called whenever bytes move, so a caller can tell a slow transfer from a hung one. */
     private val onActivity: () -> Unit = {},
+    private val temps: TempFiles = TempFiles.Untracked,
 ) {
 
     fun upload(
@@ -60,6 +72,7 @@ class Uploader(
         }
 
         val temp = join(directory, Destination.tempName(local.mediaId))
+        temps.created(temp)
         try {
             val sent = writeTemp(temp, local, onProgress)
             val onServer = share.stat(RemotePath.toSmb(temp))?.size
@@ -71,21 +84,46 @@ class Uploader(
             repeat(RENAME_ATTEMPTS) {
                 when (val r = resolution) {
                     is NameResolution.AlreadyPresent -> {
-                        deleteQuietly(temp)
+                        deleteTemp(temp)
                         return UploadResult.AlreadyPresent(join(directory, r.name))
                     }
                     is NameResolution.Upload -> {
                         val target = join(directory, r.name)
-                        if (rename(temp, target)) return UploadResult.Uploaded(target, sent)
+                        if (rename(temp, target)) {
+                            temps.removed(temp)
+                            return UploadResult.Uploaded(target, sent)
+                        }
                     }
                 }
                 resolution = NameResolver.resolve(dir, local.name, local.size)
             }
             throw IOException("could not find a free name for ${local.name}")
         } catch (e: Exception) {
-            deleteQuietly(temp)
+            deleteTemp(temp)
             throw e
         }
+    }
+
+    /**
+     * Deletes a temporary file an earlier pass left behind. Refuses anything that is not
+     * one of our ".part" names, so a bad record can never delete a real file. True when the
+     * file is gone (deleted now, or already missing).
+     */
+    fun removeLeftover(path: String): Boolean {
+        if (!Destination.isTempName(path.substringAfterLast('/'))) return true
+        val smb = RemotePath.toSmb(path)
+        return try {
+            share.rm(smb)
+            true
+        } catch (e: SMBApiException) {
+            // Servers word "it is not there" differently; ask the way that handles them all.
+            share.stat(smb) == null
+        }
+    }
+
+    /** Deletes [path] if the connection still allows; otherwise it stays recorded. */
+    private fun deleteTemp(path: String) {
+        if (runCatching { removeLeftover(path) }.getOrDefault(false)) temps.removed(path)
     }
 
     /** Creates [path] and its parents, tolerating ones that already exist. */
@@ -156,10 +194,6 @@ class Uploader(
         SMB2CreateDisposition.FILE_OPEN,
         setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
     )
-
-    private fun deleteQuietly(path: String) {
-        runCatching { share.rm(RemotePath.toSmb(path)) }
-    }
 
     private companion object {
         const val BUFFER_BYTES = 1 shl 20

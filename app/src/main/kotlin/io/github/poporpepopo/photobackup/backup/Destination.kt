@@ -1,27 +1,44 @@
 package io.github.poporpepopo.photobackup.backup
 
 import java.time.Instant
+import java.time.YearMonth
 import java.time.ZoneId
 
 /** Where on the share a media item goes. Pure, so it can be unit tested on the JVM. */
 object Destination {
 
     /**
-     * "<base>/<yyyy>/<MM>", using the capture time when MediaStore has one and the time the
-     * file was added otherwise. The date is taken in [zone] (the phone's time zone), which
-     * is what a person means by "the photos from October".
+     * "<base>/<yyyy>/<MM>". The month comes from, in order: MediaStore's capture time, the
+     * capture month read from the file's EXIF ([exifMonth]; MediaStore drops capture times
+     * that lack a time zone), and the time the file was added. Instants are read in [zone]
+     * (the phone's time zone), which is what a person means by "the photos from October".
      */
     fun directory(
         baseFolder: String,
         dateTakenMillis: Long?,
         dateAddedSeconds: Long,
         zone: ZoneId,
+        exifMonth: YearMonth? = null,
     ): String {
-        val instant = dateTakenMillis?.takeIf { it > 0 }?.let(Instant::ofEpochMilli)
-            ?: Instant.ofEpochSecond(dateAddedSeconds)
-        val date = instant.atZone(zone).toLocalDate()
-        val yearMonth = "%04d/%02d".format(date.year, date.monthValue)
+        val month = dateTakenMillis?.takeIf { it > 0 }
+            ?.let { YearMonth.from(Instant.ofEpochMilli(it).atZone(zone)) }
+            ?: exifMonth
+            ?: YearMonth.from(Instant.ofEpochSecond(dateAddedSeconds).atZone(zone))
+        val yearMonth = "%04d/%02d".format(month.year, month.monthValue)
         return if (baseFolder.isEmpty()) yearMonth else "$baseFolder/$yearMonth"
+    }
+
+    /**
+     * The year and month of an EXIF date ("yyyy:MM:dd HH:mm:ss", local wall-clock time at
+     * the camera). Null for anything else, including the all-zero placeholder some cameras
+     * write. No time zone is involved: the camera's own calendar month is the answer.
+     */
+    fun exifYearMonth(value: String?): YearMonth? {
+        val m = EXIF_DATE.matchEntire(value?.trim() ?: return null) ?: return null
+        val year = m.groupValues[1].toInt()
+        val month = m.groupValues[2].toInt()
+        if (year !in 1900..2999 || month !in 1..12) return null
+        return YearMonth.of(year, month)
     }
 
     /**
@@ -54,6 +71,12 @@ object Destination {
      * by the retry instead of piling up.
      */
     fun tempName(mediaId: Long): String = ".photobackup-$mediaId.part"
+
+    fun isTempName(name: String): Boolean = TEMP_NAME.matches(name)
+
+    private val TEMP_NAME = Regex("""\.photobackup-\d+\.part""")
+
+    private val EXIF_DATE = Regex("""(\d{4})[:-](\d{2})[:-]\d{2}[ T].*""")
 
     private val FORBIDDEN = setOf('\\', '/', ':', '*', '?', '"', '<', '>', '|')
 }

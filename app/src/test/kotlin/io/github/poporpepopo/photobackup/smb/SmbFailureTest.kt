@@ -1,5 +1,8 @@
 package io.github.poporpepopo.photobackup.smb
 
+import com.hierynomus.mssmb2.SMBApiException
+import com.hierynomus.mssmb2.SMB2MessageCommandCode
+import com.hierynomus.mserref.NtStatus
 import com.hierynomus.protocol.transport.TransportException
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -25,6 +28,11 @@ class SmbFailureTest {
 
     @Test fun refusedConnectionIsUnreachable() {
         assertEquals(SmbFailure.Unreachable, SmbFailure.classify(TransportException(ConnectException())))
+    }
+
+    @Test fun fullDiskIsItsOwnFailure() {
+        val e = SMBApiException(NtStatus.STATUS_DISK_FULL.value, SMB2MessageCommandCode.SMB2_WRITE, null)
+        assertEquals(SmbFailure.DiskFull, SmbFailure.classify(IOException("write failed", e)))
     }
 
     @Test fun anythingElseKeepsItsMessage() {

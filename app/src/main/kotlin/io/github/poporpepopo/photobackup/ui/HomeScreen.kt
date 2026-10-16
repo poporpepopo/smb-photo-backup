@@ -1,6 +1,8 @@
 package io.github.poporpepopo.photobackup.ui
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -49,6 +51,7 @@ import io.github.poporpepopo.photobackup.backup.SyncSummary
 import io.github.poporpepopo.photobackup.media.MediaAccess
 import io.github.poporpepopo.photobackup.media.MediaPermissionState
 import io.github.poporpepopo.photobackup.media.MediaPermissions
+import io.github.poporpepopo.photobackup.smb.LocalNetworkAccess
 
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
@@ -68,9 +71,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        state.permission?.let { PermissionCard(it, onResult = vm::refresh) }
-        if (!state.notificationsAllowed) NotificationCard(onResult = vm::refresh)
+        // Cards that need the user come first; each disappears once it is dealt with.
+        state.permission?.takeUnless { it.readyForBackup }?.let { PermissionCard(it, onResult = vm::refresh) }
+        if (!state.localNetworkAllowed) LocalNetworkCard(onResult = vm::refresh)
         SyncCard(state, onSync = vm::syncNow)
+        if (!state.batteryUnrestricted) BatteryCard()
+        if (!state.notificationsAllowed) NotificationCard(onResult = vm::refresh)
     }
 }
 
@@ -119,6 +125,30 @@ private fun PermissionCard(p: MediaPermissionState, onResult: () -> Unit) {
     }
 }
 
+/** Android 17+: without it the router cannot be reached at all. */
+@Composable
+private fun LocalNetworkCard(onResult: () -> Unit) {
+    val context = LocalContext.current
+    var asked by rememberSaveable { mutableStateOf(false) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        asked = true
+        onResult()
+    }
+    HomeCard(title = stringResource(R.string.local_network_title), warn = true) {
+        Text(stringResource(R.string.local_network_text))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { launcher.launch(LocalNetworkAccess.PERMISSION) }) {
+                Text(stringResource(R.string.button_allow_local_network))
+            }
+            if (asked) {
+                OutlinedButton(onClick = { openAppSettings(context) }) {
+                    Text(stringResource(R.string.button_open_app_settings))
+                }
+            }
+        }
+    }
+}
+
 /** Optional: without it the pass still runs, but its progress notification is hidden. */
 @Composable
 private fun NotificationCard(onResult: () -> Unit) {
@@ -144,6 +174,34 @@ private fun NotificationCard(onResult: () -> Unit) {
     }
 }
 
+/**
+ * Recommended: an optimized app's periodic job is rationed by app standby (as rarely as
+ * once a day for a rarely opened app) and may not start a foreground service from the
+ * background, so a long upload is cut off after about 10 minutes.
+ */
+@SuppressLint("BatteryLife") // see the permission's comment in the manifest
+@Composable
+private fun BatteryCard() {
+    val context = LocalContext.current
+    HomeCard(title = stringResource(R.string.battery_title)) {
+        Text(stringResource(R.string.battery_text))
+        Button(
+            onClick = {
+                val ask = Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.fromParts("package", context.packageName, null),
+                )
+                try {
+                    context.startActivity(ask)
+                } catch (_: ActivityNotFoundException) {
+                    // Some builds drop the direct dialog; the list is always there.
+                    context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            },
+        ) { Text(stringResource(R.string.button_battery)) }
+    }
+}
+
 private fun openAppSettings(context: Context) {
     context.startActivity(
         Intent(
@@ -163,11 +221,16 @@ private fun SyncCard(state: HomeState, onSync: () -> Unit) {
         DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_NUMERIC_DATE,
     )
     val run = state.run
-    val lastRun = state.status.lastRun
+    val status = state.status
+    val lastRun = status.lastRun
     val failed = lastRun != null && run == RunState.Idle &&
         (lastRun.outcome is SyncOutcome.Aborted || lastRun.outcome is SyncOutcome.NotReady)
 
     HomeCard(title = stringResource(R.string.sync_title), warn = failed) {
+        Text(
+            status.lastSyncAt?.let { stringResource(R.string.status_last_sync, time(it)) }
+                ?: stringResource(R.string.sync_never),
+        )
         val uploaded = state.uploadedCount
         val pending = state.pendingCount
         if (uploaded != null && pending != null) {
@@ -179,10 +242,37 @@ private fun SyncCard(state: HomeState, onSync: () -> Unit) {
                 ),
             )
         }
-        Text(
-            state.status.lastSyncAt?.let { stringResource(R.string.sync_last_success, time(it)) }
-                ?: stringResource(R.string.sync_never),
-        )
+        state.nextAutoSync?.let { next ->
+            Text(
+                when {
+                    next > System.currentTimeMillis() -> stringResource(
+                        if (state.chargingOnly) R.string.status_next_charging else R.string.status_next,
+                        time(next),
+                    )
+                    state.chargingOnly -> stringResource(R.string.status_next_due_charging)
+                    else -> stringResource(R.string.status_next_due)
+                },
+            )
+        }
+        // The latest error, unless it is the last run itself (shown below in full).
+        val lastError = status.lastError
+        when {
+            lastError == null -> Text(stringResource(R.string.status_no_error))
+            lastError != lastRun -> {
+                Text(
+                    stringResource(R.string.status_last_error, time(lastError.atMillis)),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                OutcomeText(lastError.outcome)
+                if ((status.lastSyncAt ?: 0) > lastError.atMillis) {
+                    Text(
+                        stringResource(R.string.status_error_since_ok),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+
         Button(
             onClick = onSync,
             enabled = state.permission?.access != MediaAccess.None && run == RunState.Idle && !state.queued,
@@ -233,6 +323,7 @@ private fun OutcomeText(outcome: SyncOutcome) {
                 errorText(
                     when (outcome.reason) {
                         NotReadyReason.NoPermission -> UiError.NoPermission
+                        NotReadyReason.NoLocalNetwork -> UiError.NoLocalNetwork
                         NotReadyReason.NotConfigured -> UiError.NotConfigured
                         NotReadyReason.PasswordUnreadable -> UiError.PasswordUnreadable
                     },
@@ -243,8 +334,9 @@ private fun OutcomeText(outcome: SyncOutcome) {
         }
     } ?: return
 
-    if (outcome is SyncOutcome.Finished && summary == SyncSummary()) {
-        Text(stringResource(R.string.sync_nothing_to_do))
+    if (summary == SyncSummary()) {
+        // An abort before the first item has nothing to add to its error.
+        if (outcome is SyncOutcome.Finished) Text(stringResource(R.string.sync_nothing_to_do))
         return
     }
     Text(stringResource(R.string.sync_summary, summary.uploaded, summary.alreadyPresent, summary.failed))

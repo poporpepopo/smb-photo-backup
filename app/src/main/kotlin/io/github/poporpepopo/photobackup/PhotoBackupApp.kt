@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 class PhotoBackupApp : Application() {
     val settings: SettingsRepository by lazy { SettingsRepository(this) }
     val database: UploadDatabase by lazy { UploadDatabase.open(this) }
-    val syncRunner: SyncRunner by lazy { SyncRunner(this, settings, database.uploaded()) }
+    val syncRunner: SyncRunner by lazy { SyncRunner(this, settings, database.uploaded(), database.partials()) }
     val syncStatus: SyncStatusStore by lazy { SyncStatusStore(this) }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

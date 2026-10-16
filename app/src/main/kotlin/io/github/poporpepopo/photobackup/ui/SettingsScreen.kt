@@ -1,5 +1,8 @@
 package io.github.poporpepopo.photobackup.ui
 
+import android.text.format.Formatter
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,14 +48,21 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.poporpepopo.photobackup.PhotoBackupApp
 import io.github.poporpepopo.photobackup.R
+import io.github.poporpepopo.photobackup.smb.LocalNetworkAccess
 import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
     val app = LocalContext.current.applicationContext as PhotoBackupApp
     val vm: SettingsViewModel = viewModel(
-        factory = viewModelFactory { initializer { SettingsViewModel(app.settings) } },
+        factory = viewModelFactory {
+            initializer { SettingsViewModel(app.settings) { LocalNetworkAccess.granted(app) } }
+        },
     )
+    // Asked at the moment it is needed; if refused, the test reports why.
+    val askLocalNetwork = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { vm.testConnection() }
     val form by vm.form.collectAsStateWithLifecycle()
     val test by vm.test.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -97,7 +107,13 @@ fun SettingsScreen(snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
                 vm.save { scope.launch { snackbar.showSnackbar(savedText) } }
             }) { Text(stringResource(R.string.button_save)) }
             OutlinedButton(
-                onClick = vm::testConnection,
+                onClick = {
+                    if (LocalNetworkAccess.granted(app)) {
+                        vm.testConnection()
+                    } else {
+                        askLocalNetwork.launch(LocalNetworkAccess.PERMISSION)
+                    }
+                },
                 enabled = test != TestState.Running,
             ) { Text(stringResource(R.string.button_test)) }
         }
@@ -189,6 +205,16 @@ private fun TestResult(state: TestState) {
                         if (state.folderExists) R.string.test_folder_exists
                         else R.string.test_folder_missing,
                         state.folder,
+                    ),
+                )
+            }
+            state.space?.let { (free, total) ->
+                val context = LocalContext.current
+                Text(
+                    stringResource(
+                        R.string.test_free_space,
+                        Formatter.formatShortFileSize(context, free),
+                        Formatter.formatShortFileSize(context, total),
                     ),
                 )
             }

@@ -17,6 +17,13 @@ sealed interface SmbFailure {
     data object AuthFailed : SmbFailure
     data object ShareNotFound : SmbFailure
     data object AccessDenied : SmbFailure
+    /**
+     * Something answers at the router's address, but not the server the connection test
+     * reached. We stop before logging in, so it never sees an authentication attempt.
+     */
+    data object WrongServer : SmbFailure
+    /** The share's disk is full. Every further item would fail the same way. */
+    data object DiskFull : SmbFailure
     data class Other(val detail: String) : SmbFailure
 
     companion object {
@@ -46,6 +53,7 @@ sealed interface SmbFailure {
             NtStatus.STATUS_PASSWORD_EXPIRED -> AuthFailed
             NtStatus.STATUS_BAD_NETWORK_NAME -> ShareNotFound
             NtStatus.STATUS_ACCESS_DENIED -> AccessDenied
+            NtStatus.STATUS_DISK_FULL -> DiskFull
             else -> null
         }
     }

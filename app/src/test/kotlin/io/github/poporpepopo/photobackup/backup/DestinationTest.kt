@@ -1,7 +1,11 @@
 package io.github.poporpepopo.photobackup.backup
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -43,6 +47,41 @@ class DestinationTest {
     @Test fun nestedBaseFolder() {
         val taken = millis(2026, 10, 15, 12)
         assertEquals("Backup/Pixel/2026/10", Destination.directory("Backup/Pixel", taken, 0, tokyo))
+    }
+
+    @Test fun exifMonthFillsInWhenMediaStoreHasNoCaptureTime() {
+        val added = millis(2026, 10, 16, 9) / 1000
+        val exif = YearMonth.of(2019, 8)
+        assertEquals("B/2019/08", Destination.directory("B", null, added, tokyo, exif))
+    }
+
+    @Test fun mediaStoreCaptureTimeBeatsExif() {
+        val taken = millis(2026, 3, 14, 12)
+        assertEquals("B/2026/03", Destination.directory("B", taken, 0, tokyo, YearMonth.of(2019, 8)))
+    }
+
+    @Test fun exifYearMonthReadsTheCalendarMonthAsWritten() {
+        assertEquals(YearMonth.of(2019, 8), Destination.exifYearMonth("2019:08:31 23:59:59"))
+        // No time zone is applied: 1 January 00:10 stays in January wherever the phone is.
+        assertEquals(YearMonth.of(2020, 1), Destination.exifYearMonth("2020:01:01 00:10:00"))
+        assertEquals(YearMonth.of(2021, 5), Destination.exifYearMonth(" 2021-05-02T10:00:00 "))
+    }
+
+    @Test fun exifYearMonthRejectsPlaceholdersAndJunk() {
+        assertNull(Destination.exifYearMonth(null))
+        assertNull(Destination.exifYearMonth(""))
+        assertNull(Destination.exifYearMonth("0000:00:00 00:00:00"))
+        assertNull(Destination.exifYearMonth("    :  :     :  :  "))
+        assertNull(Destination.exifYearMonth("2019:13:01 00:00:00"))
+        assertNull(Destination.exifYearMonth("2019:08:31"))
+    }
+
+    @Test fun recognisesOnlyOurTempNames() {
+        assertTrue(Destination.isTempName(Destination.tempName(1234)))
+        assertFalse(Destination.isTempName("IMG.jpg"))
+        assertFalse(Destination.isTempName(".photobackup-.part"))
+        assertFalse(Destination.isTempName(".photobackup-12.part.jpg"))
+        assertFalse(Destination.isTempName("x.photobackup-12.part"))
     }
 
     @Test fun sanitizeKeepsOrdinaryNames() {

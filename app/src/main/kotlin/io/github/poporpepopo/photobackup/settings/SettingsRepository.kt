@@ -12,6 +12,7 @@ import io.github.poporpepopo.photobackup.smb.SmbTarget
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 /** Everything except the password, which is never part of a plain settings object. */
 data class BackupSettings(
@@ -77,7 +78,35 @@ class SettingsRepository(
             StoredPassword.Unreadable ->
                 if (s.username.isBlank()) "" else return TargetResult.PasswordUnreadable
         }
-        return TargetResult.Ready(s, SmbTarget(s.host, s.share, s.username, password))
+        val serverId = serverId(s.host)
+        return TargetResult.Ready(
+            s,
+            SmbTarget(s.host, s.share, s.username, password, expectedServerId = serverId),
+        )
+    }
+
+    /** The server ID remembered for [host], if any. */
+    private suspend fun serverId(host: String): UUID? {
+        val p = store.data.first()
+        if (p[SERVER_ID_HOST] != host) return null
+        return p[SERVER_ID]?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    }
+
+    /**
+     * Remembers which server answered at [host], so a different server at the same address
+     * (another network that happens to use the same IP) is refused before logging in. A
+     * null [id] forgets it.
+     */
+    suspend fun rememberServer(host: String, id: UUID?) {
+        store.edit { p ->
+            if (id == null) {
+                p.remove(SERVER_ID)
+                p.remove(SERVER_ID_HOST)
+            } else {
+                p[SERVER_ID] = id.toString()
+                p[SERVER_ID_HOST] = host.trim()
+            }
+        }
     }
 
     /** Saves [s]. A null or empty [newPassword] keeps the stored one. */
@@ -103,5 +132,7 @@ class SettingsRepository(
         val INCLUDE_VIDEOS = booleanPreferencesKey("include_videos")
         val CHARGING_ONLY = booleanPreferencesKey("charging_only")
         val PASSWORD_ENC = stringPreferencesKey("password_enc")
+        val SERVER_ID = stringPreferencesKey("server_id")
+        val SERVER_ID_HOST = stringPreferencesKey("server_id_host")
     }
 }

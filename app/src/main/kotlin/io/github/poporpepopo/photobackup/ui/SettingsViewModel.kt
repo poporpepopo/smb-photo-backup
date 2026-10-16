@@ -50,11 +50,17 @@ sealed interface TestState {
         val folder: String,
         val folders: List<String>,
         val folderExists: Boolean,
+        /** Free and total bytes, when the server reports them. */
+        val space: Pair<Long, Long>?,
     ) : TestState
     data class Failed(val error: UiError, val host: String) : TestState
 }
 
-class SettingsViewModel(private val repo: SettingsRepository) : ViewModel() {
+class SettingsViewModel(
+    private val repo: SettingsRepository,
+    /** Whether Android lets us reach the LAN at all (a runtime permission on 17+). */
+    private val localNetworkAllowed: () -> Boolean,
+) : ViewModel() {
 
     private val _form = MutableStateFlow(SettingsForm())
     val form: StateFlow<SettingsForm> = _form.asStateFlow()
@@ -114,11 +120,14 @@ class SettingsViewModel(private val repo: SettingsRepository) : ViewModel() {
         if (host.isEmpty()) return fail(UiError.HostRequired)
         if (share.isEmpty()) return fail(UiError.ShareRequired)
         val password = resolvePassword(f) ?: return fail(UiError.PasswordUnreadable)
+        if (!localNetworkAllowed()) return fail(UiError.NoLocalNetwork)
         if (!HostProbe.isReachable(host)) return fail(UiError.Smb(SmbFailure.Unreachable))
         return try {
             val target = SmbTarget(host, share, f.username.trim(), password)
             val listing = SmbGateway.probeShare(target, folder)
-            TestState.Success(host, share, folder, listing.folders, listing.destinationExists)
+            // A successful test is the user vouching for this server.
+            repo.rememberServer(host, listing.serverId)
+            TestState.Success(host, share, folder, listing.folders, listing.destinationExists, listing.space)
         } catch (e: SmbFailureException) {
             fail(UiError.Smb(e.failure))
         }

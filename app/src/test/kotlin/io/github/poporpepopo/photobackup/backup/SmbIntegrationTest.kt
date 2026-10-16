@@ -1,5 +1,7 @@
 package io.github.poporpepopo.photobackup.backup
 
+import io.github.poporpepopo.photobackup.smb.SmbFailure
+import io.github.poporpepopo.photobackup.smb.SmbFailureException
 import io.github.poporpepopo.photobackup.smb.SmbGateway
 import io.github.poporpepopo.photobackup.smb.SmbTarget
 import kotlinx.coroutines.CompletableDeferred
@@ -10,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
@@ -17,6 +20,7 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
+import java.util.UUID
 
 /**
  * Runs [Uploader] against a real SMB server. Skipped unless SMB_TEST_PORT (server on
@@ -65,6 +69,47 @@ class SmbIntegrationTest {
     @Test(timeout = 60_000) fun emptyFile() {
         assertEquals(UploadResult.Uploaded("$dir/empty.jpg", 0), upload(local(3, ByteArray(0), "empty.jpg")))
         assertEquals(UploadResult.AlreadyPresent("$dir/empty.jpg"), upload(local(3, ByteArray(0), "empty.jpg")))
+    }
+
+    @Test(timeout = 60_000) fun tempFileIsTrackedUntilRenamed() {
+        val events = mutableListOf<String>()
+        val temps = object : TempFiles {
+            override fun created(path: String) { events += "+$path" }
+            override fun removed(path: String) { events += "-$path" }
+        }
+        runBlocking {
+            SmbGateway.withShare(target()) { Uploader(it.disk, temps = temps).upload(local(5, ByteArray(10)), dir) }
+        }
+        val temp = "$dir/${Destination.tempName(5)}"
+        assertEquals(listOf("+$temp", "-$temp"), events)
+    }
+
+    @Test(timeout = 60_000) fun removesLeftoversButNeverOtherFiles() {
+        upload(local(1, ByteArray(10)))
+        onDisk(Destination.tempName(9)).writeBytes(ByteArray(3))
+        runBlocking {
+            SmbGateway.withShare(target()) {
+                val u = Uploader(it.disk)
+                assertTrue(u.removeLeftover("$dir/${Destination.tempName(9)}"))
+                assertTrue("already gone counts as removed", u.removeLeftover("$dir/${Destination.tempName(9)}"))
+                assertTrue(u.removeLeftover("$dir/IMG.jpg")) // not ours: skipped, not deleted
+            }
+        }
+        assertFalse(onDisk(Destination.tempName(9)).exists())
+        assertTrue(onDisk("IMG.jpg").exists())
+    }
+
+    @Test(timeout = 60_000) fun refusesAServerWithAnotherIdBeforeLoggingIn() = runBlocking {
+        val listing = SmbGateway.probeShare(target(), "")
+        val id = listing.serverId
+        assertNotNull("test server sends a server ID", id)
+        listing.space?.let { (free, total) -> assertTrue(free in 0..total) }
+        val pinned = SmbTarget("127.0.0.1", "USB", "tester", "Dummy-Pass-123", port!!, expectedServerId = id)
+        SmbGateway.withShare(pinned) { }
+
+        val other = SmbTarget("127.0.0.1", "USB", "tester", "Dummy-Pass-123", port, expectedServerId = UUID.randomUUID())
+        val failure = runCatching { SmbGateway.withShare(other) { } }.exceptionOrNull()
+        assertEquals(SmbFailure.WrongServer, (failure as SmbFailureException).failure)
     }
 
     @Test(timeout = 60_000) fun cancellingMidUploadStopsPromptly() = runBlocking {

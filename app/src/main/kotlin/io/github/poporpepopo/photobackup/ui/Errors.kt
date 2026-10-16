@@ -12,6 +12,7 @@ sealed interface UiError {
     data object NotConfigured : UiError
     data object PasswordUnreadable : UiError
     data object NoPermission : UiError
+    data object NoLocalNetwork : UiError
     data object NoMedia : UiError
     data class Smb(val failure: SmbFailure) : UiError
 }
@@ -23,6 +24,7 @@ fun errorText(e: UiError, host: String): String = when (e) {
     UiError.NotConfigured -> stringResource(R.string.error_not_configured)
     UiError.PasswordUnreadable -> stringResource(R.string.error_password_unreadable)
     UiError.NoPermission -> stringResource(R.string.error_no_permission)
+    UiError.NoLocalNetwork -> stringResource(R.string.error_no_local_network)
     UiError.NoMedia -> stringResource(R.string.error_no_media)
     is UiError.Smb -> when (val f = e.failure) {
         SmbFailure.Unreachable -> stringResource(R.string.error_unreachable, host)
@@ -31,6 +33,8 @@ fun errorText(e: UiError, host: String): String = when (e) {
         SmbFailure.AuthFailed -> stringResource(R.string.error_auth)
         SmbFailure.ShareNotFound -> stringResource(R.string.error_share_not_found)
         SmbFailure.AccessDenied -> stringResource(R.string.error_access_denied)
+        SmbFailure.WrongServer -> stringResource(R.string.error_wrong_server)
+        SmbFailure.DiskFull -> stringResource(R.string.error_disk_full)
         is SmbFailure.Other -> stringResource(R.string.error_other, f.detail)
     }
 }

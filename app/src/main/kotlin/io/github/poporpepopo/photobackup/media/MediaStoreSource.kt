@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import java.io.FileNotFoundException
 import java.io.InputStream
 
@@ -46,6 +47,17 @@ class MediaStoreSource(context: Context) {
     fun openOriginal(item: MediaItem): InputStream =
         resolver.openInputStream(originalUri(item))
             ?: throw FileNotFoundException(item.uri.toString())
+
+    /**
+     * The capture date written in the photo's EXIF, for photos MediaStore has no capture
+     * time for. Opened read-only; the file is never written.
+     */
+    fun exifCaptureDate(item: MediaItem): String? =
+        resolver.openFileDescriptor(item.uri, "r")?.use { fd ->
+            val exif = ExifInterface(fd.fileDescriptor)
+            exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                ?: exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED)
+        }
 
     private fun queryCollection(collection: Uri, isVideo: Boolean, limit: Int?): List<MediaItem> {
         val args = Bundle().apply {

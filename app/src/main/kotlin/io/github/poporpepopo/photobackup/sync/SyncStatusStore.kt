@@ -140,6 +140,8 @@ internal object StatusCodec {
             SmbFailure.AuthFailed -> "auth"
             SmbFailure.ShareNotFound -> "share_not_found"
             SmbFailure.AccessDenied -> "access_denied"
+            SmbFailure.WrongServer -> "wrong_server"
+            SmbFailure.DiskFull -> "disk_full"
             is SmbFailure.Other -> "other"
         }
 
@@ -150,6 +152,8 @@ internal object StatusCodec {
         "auth" -> SmbFailure.AuthFailed
         "share_not_found" -> SmbFailure.ShareNotFound
         "access_denied" -> SmbFailure.AccessDenied
+        "wrong_server" -> SmbFailure.WrongServer
+        "disk_full" -> SmbFailure.DiskFull
         else -> SmbFailure.Other(detail ?: code.orEmpty())
     }
 }

@@ -30,7 +30,7 @@ class StatusCodecTest {
             SyncOutcome.Aborted(SmbFailure.Other("size mismatch"), summary),
         ) + listOf(
             SmbFailure.Unreachable, SmbFailure.Timeout, SmbFailure.ConnectionLost,
-            SmbFailure.AuthFailed, SmbFailure.ShareNotFound, SmbFailure.AccessDenied,
+            SmbFailure.AuthFailed, SmbFailure.ShareNotFound, SmbFailure.AccessDenied, SmbFailure.WrongServer, SmbFailure.DiskFull,
         ).map { SyncOutcome.Aborted(it, SyncSummary(uploaded = 1)) } +
             NotReadyReason.entries.map { SyncOutcome.NotReady(it) }
 

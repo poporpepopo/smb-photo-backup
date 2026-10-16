@@ -46,6 +46,18 @@ object SyncScheduler {
         WorkManager.getInstance(context).enqueueUniqueWork(MANUAL, ExistingWorkPolicy.KEEP, request)
     }
 
+    /**
+     * When the periodic job may next run (it can start later: Android batches jobs that
+     * wait for the network), or null if it is not scheduled.
+     */
+    fun nextPeriodicRun(context: Context): Flow<Long?> =
+        WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(PERIODIC)
+            .map { infos ->
+                infos.firstOrNull { it.state == WorkInfo.State.ENQUEUED }
+                    ?.nextScheduleTimeMillis
+                    ?.takeIf { it != Long.MAX_VALUE }
+            }
+
     /** True while a "Sync now" request is waiting for WorkManager to start it. */
     fun manualQueued(context: Context): Flow<Boolean> =
         WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(MANUAL)
