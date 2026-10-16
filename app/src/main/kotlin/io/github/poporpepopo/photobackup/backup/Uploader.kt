@@ -10,6 +10,7 @@ import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.share.File
 import io.github.poporpepopo.photobackup.smb.RemotePath
 import io.github.poporpepopo.photobackup.smb.stat
+import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
 
@@ -28,6 +29,16 @@ class LocalFile(
     val size: Long,
     val open: () -> InputStream,
 )
+
+/** What the bytes reported by [Uploader.upload]'s progress are doing. */
+enum class Transfer {
+    /** Reading back a same-sized file on the share to see whether it is this item. */
+    Comparing,
+
+    /** As [Comparing], but only the parts [ContentSample] picks, for a large file. */
+    Sampling,
+    Sending,
+}
 
 /** Told when a temporary file may be left on the share and when it is gone again. */
 interface TempFiles {
@@ -61,10 +72,10 @@ class Uploader(
     fun upload(
         local: LocalFile,
         directory: String,
-        onProgress: (sent: Long, total: Long) -> Unit = { _, _ -> },
+        onProgress: (transfer: Transfer, done: Long, total: Long) -> Unit = { _, _, _ -> },
     ): UploadResult {
         mkdirs(directory)
-        val dir = ShareDirectory(share, directory, local, onActivity)
+        val dir = ShareDirectory(share, directory, local, onActivity, onProgress)
 
         var resolution = NameResolver.resolve(dir, local.name, local.size)
         if (resolution is NameResolution.AlreadyPresent) {
@@ -146,7 +157,11 @@ class Uploader(
         }
     }
 
-    private fun writeTemp(path: String, local: LocalFile, onProgress: (Long, Long) -> Unit): Long {
+    private fun writeTemp(
+        path: String,
+        local: LocalFile,
+        onProgress: (Transfer, Long, Long) -> Unit,
+    ): Long {
         var sent = 0L
         share.openFile(
             RemotePath.toSmb(path),
@@ -159,14 +174,14 @@ class Uploader(
             file.outputStream.use { out ->
                 local.open().use { input ->
                     val buf = ByteArray(BUFFER_BYTES)
-                    onProgress(0, local.size)
+                    onProgress(Transfer.Sending, 0, local.size)
                     while (true) {
                         val n = input.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)
                         sent += n
                         onActivity()
-                        onProgress(sent, local.size)
+                        onProgress(Transfer.Sending, sent, local.size)
                     }
                 }
             }
@@ -209,6 +224,7 @@ private class ShareDirectory(
     private val directory: String,
     private val local: LocalFile,
     private val onActivity: () -> Unit,
+    private val onCompared: (Transfer, done: Long, total: Long) -> Unit,
 ) : RemoteDirectory {
 
     private fun smbPath(name: String) =
@@ -228,25 +244,64 @@ private class ShareDirectory(
             SMB2CreateDisposition.FILE_OPEN,
             setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
         ).use { file ->
-            // Not file.inputStream: it reads ahead past the end of the file, and some
-            // servers answer that read with a reply smbj cannot parse. We know the size,
-            // so read exactly that much with positional reads.
-            val remote = BoundedInputStream(local.size) { buf, at, off, len ->
-                file.read(buf, at, off, len).also { onActivity() }
+            val ranges = ContentSample.ranges(local.size)
+            val total = ranges.sumOf { (start, end) -> end - start }
+            val transfer = if (ContentSample.isPartial(local.size)) Transfer.Sampling else Transfer.Comparing
+            var compared = 0L
+            local.open().use { mine ->
+                var at = 0L
+                for ((start, end) in ranges) {
+                    skipFully(mine, start - at)
+                    // Not file.inputStream: it reads ahead past the end of the file, and
+                    // some servers answer that read with a reply smbj cannot parse. Read
+                    // exactly the range with positional reads.
+                    val remote = BoundedInputStream(end - start, start) { buf, pos, off, len ->
+                        file.read(buf, pos, off, len).also { n ->
+                            onActivity()
+                            if (n > 0) {
+                                compared += n
+                                // Reported against the whole file, so the pass's byte count
+                                // moves on by the item's size when it is done.
+                                onCompared(transfer, local.size * compared / total, local.size)
+                            }
+                        }
+                    }
+                    // [mine] is sequential and already at [start].
+                    val ours = BoundedInputStream(end - start, start) { buf, _, off, len -> mine.read(buf, off, len) }
+                    if (!streamsEqual(remote, ours)) return@use false
+                    at = end
+                }
+                // The ranges end at local.size; a longer file here is not the same file.
+                mine.read() < 0
             }
-            local.open().use { mine -> streamsEqual(remote, mine) }
         }
 }
 
+/** Skips [n] bytes; a file stream does it by seeking, without reading them. */
+private fun skipFully(input: InputStream, n: Long) {
+    var left = n
+    while (left > 0) {
+        val skipped = input.skip(left)
+        if (skipped > 0) {
+            left -= skipped
+        } else {
+            if (input.read() < 0) throw EOFException("local file ended early")
+            left--
+        }
+    }
+}
+
 /**
- * Exposes the first [size] bytes behind [readAt] (a positional read: buffer, file offset,
- * buffer offset, length) as an InputStream, never asking for anything past [size].
+ * Exposes [size] bytes from [start] behind [readAt] (a positional read: buffer, file
+ * offset, buffer offset, length) as an InputStream, never asking for anything past them.
  */
 internal class BoundedInputStream(
-    private val size: Long,
+    size: Long,
+    start: Long = 0,
     private val readAt: (ByteArray, Long, Int, Int) -> Int,
 ) : InputStream() {
-    private var position = 0L
+    private var position = start
+    private val end = start + size
 
     override fun read(): Int {
         val one = ByteArray(1)
@@ -255,8 +310,8 @@ internal class BoundedInputStream(
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
         if (len == 0) return 0
-        if (position >= size) return -1
-        val n = readAt(b, position, off, minOf(len.toLong(), size - position).toInt())
+        if (position >= end) return -1
+        val n = readAt(b, position, off, minOf(len.toLong(), end - position).toInt())
         if (n <= 0) return -1
         position += n
         return n

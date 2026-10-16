@@ -44,6 +44,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 | `media/MediaPermissions.kt` | 全件・限定（Android 14+）・なし の判定と、要求する権限の一覧 |
 | `backup/Destination.kt` | 保存先 `<フォルダ>/年/月`（撮影日時が無ければ EXIF の撮影月）、ファイル名の無害化、`名前 (n).拡張子` の連番 |
 | `backup/NameResolver.kt` | 同名があれば中身を比べ、同じなら送信済み、違えば次の連番 |
+| `backup/ContentSample.kt` | 比べる範囲。16MB 以下は全部、それより大きいファイルは先頭・末尾と途中8か所だけ |
 | `backup/Uploader.kt` | 一時ファイルに書く → サーバー上のサイズを確認 → 上書き禁止でリネーム。残った一時ファイルは次の回に消す |
 | `backup/UploadDatabase.kt` | 送信済みの記録（Room）。MediaStore の ID・サイズ・更新日時と、共有上のパス。消し損ねた一時ファイルの記録も持つ |
 | `backup/SyncPlanner.kt` | 送信済み判定。サイズか更新日時が変わっていれば編集されたとみなして再送 |

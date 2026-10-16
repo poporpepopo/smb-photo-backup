@@ -28,16 +28,31 @@ import java.time.ZoneId
 import java.util.UUID
 
 data class SyncProgress(
-    /** 0-based index of the item being sent, out of [total]. */
+    /** 0-based index of the item in hand, out of [total]. */
     val index: Int,
     val total: Int,
     val name: String,
+    val transfer: Transfer,
+    /** Bytes of the item in hand compared or sent so far, out of [size]. */
     val sent: Long,
     val size: Long,
+    /** Bytes of the items before this one, out of all items in the pass. */
+    val doneBytes: Long,
+    val totalBytes: Long,
+    /** Time the rest of the pass should take; null until there is enough to go on. */
+    val remainingMillis: Long?,
 ) {
-    /** Whole-pass progress in 0..1, counting the current file by its bytes. */
+    /** The item in hand, in 0..1. */
+    val file: Float
+        get() = if (size > 0) (sent.toFloat() / size).coerceIn(0f, 1f) else 1f
+
+    /** The whole pass by bytes, in 0..1, so a few large videos are not one item each. */
     val overall: Float
-        get() = (index + if (size > 0) sent.toFloat() / size else 1f) / total
+        get() = if (totalBytes > 0) {
+            ((doneBytes + sent).toFloat() / totalBytes).coerceIn(0f, 1f)
+        } else {
+            (index + file) / total
+        }
 }
 
 sealed interface RunState {
@@ -146,6 +161,12 @@ class SyncRunner(
 
         var summary = SyncSummary()
         var seenServerId: UUID? = null
+        val totalBytes = pending.sumOf { it.size }
+        var doneBytes = 0L
+        // Progress made by reading back or writing, for the rate. A sampled comparison
+        // counts as the whole file. doneBytes also jumps over items that failed.
+        var moved = 0L
+        val meter = RateMeter()
         try {
             withStallGuard(STALL_LIMIT_MS) { touch ->
                 val job = currentCoroutineContext().job
@@ -166,10 +187,19 @@ class SyncRunner(
                         if (!job.isActive) break
                         touch()
                         val name = Destination.sanitizeFileName(item.displayName, "media_${item.id}")
+                        var last = 0L
                         try {
-                            val result = sendOne(uploader, item, name, s.folder) { sent, size ->
+                            val result = sendOne(uploader, item, name, s.folder) { transfer, sent, size ->
+                                // Each comparison and the upload count from 0 again.
+                                moved += if (sent >= last) sent - last else sent
+                                last = sent
+                                val left = (totalBytes - doneBytes - sent).coerceAtLeast(0)
                                 _state.value = RunState.Sending(
-                                    SyncProgress(index, pending.size, name, sent, size),
+                                    SyncProgress(
+                                        index, pending.size, name, transfer, sent, size,
+                                        doneBytes, totalBytes,
+                                        meter.remainingMillis(clock(), moved, left),
+                                    ),
                                 )
                             }
                             dao.upsert(
@@ -194,6 +224,8 @@ class SyncRunner(
                                 failed = summary.failed + 1,
                                 lastItemError = ItemError(name, describe(e)),
                             )
+                        } finally {
+                            doneBytes += item.size
                         }
                     }
                 }
@@ -222,7 +254,7 @@ class SyncRunner(
         item: MediaItem,
         name: String,
         folder: String,
-        onProgress: (Long, Long) -> Unit,
+        onProgress: (Transfer, Long, Long) -> Unit,
     ): UploadResult {
         val size = local { media.originalSize(item) }
         val file = LocalFile(item.id, name, size) { local { media.openOriginal(item) } }

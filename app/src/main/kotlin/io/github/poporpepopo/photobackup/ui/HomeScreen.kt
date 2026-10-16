@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.text.format.DateUtils
-import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -214,7 +213,6 @@ private fun openAppSettings(context: Context) {
 @Composable
 private fun SyncCard(state: HomeState, onSync: () -> Unit) {
     val context = LocalContext.current
-    fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
     fun time(millis: Long) = DateUtils.formatDateTime(
         context,
         millis,
@@ -285,12 +283,11 @@ private fun SyncCard(state: HomeState, onSync: () -> Unit) {
             }
             is RunState.Sending -> {
                 val p = run.progress
-                Text(stringResource(R.string.sync_progress, p.index + 1, p.total, p.name))
+                Text(ProgressText.overall(context, p))
                 LinearProgressIndicator(progress = { p.overall }, modifier = Modifier.fillMaxWidth())
-                Text(
-                    stringResource(R.string.sync_file_progress, size(p.sent), size(p.size)),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Text(ProgressText.item(context, p), style = MaterialTheme.typography.bodySmall)
+                LinearProgressIndicator(progress = { p.file }, modifier = Modifier.fillMaxWidth())
+                Text(ProgressText.file(context, p), style = MaterialTheme.typography.bodySmall)
             }
             RunState.Idle -> when {
                 state.queued -> Text(stringResource(R.string.sync_queued))

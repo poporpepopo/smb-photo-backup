@@ -66,6 +66,48 @@ class SmbIntegrationTest {
         assertArrayEquals(second, onDisk("IMG (1).jpg").readBytes())
     }
 
+    /** A video-sized file: a byte pattern that differs everywhere, so any slip shows. */
+    private val video = ByteArray(20 shl 20) { (it * 31 + (it shr 16)).toByte() }
+
+    @Test(timeout = 120_000) fun largeFileIsRecognisedFromSamples() {
+        upload(local(6, video, "VID.mp4"))
+        val reports = mutableListOf<Triple<Transfer, Long, Long>>()
+        val result = runBlocking {
+            SmbGateway.withShare(target()) {
+                Uploader(it.disk).upload(local(6, video, "VID.mp4"), dir) { t, done, total -> reports += Triple(t, done, total) }
+            }
+        }
+        assertEquals(UploadResult.AlreadyPresent("$dir/VID.mp4"), result)
+        assertTrue(reports.all { it.first == Transfer.Sampling })
+        val size = video.size.toLong()
+        assertEquals(Triple(Transfer.Sampling, size, size), reports.last())
+    }
+
+    @Test(timeout = 120_000) fun largeFileDifferingInASampleGetsANumberedName() {
+        upload(local(6, video, "VID.mp4"))
+        // Same size, different bytes at the end: where a video keeps its index.
+        val other = video.copyOf().also { it[it.size - 10] = (it[it.size - 10] + 1).toByte() }
+        assertEquals(UploadResult.Uploaded("$dir/VID (1).mp4", other.size.toLong()), upload(local(7, other, "VID.mp4")))
+    }
+
+    @Test(timeout = 120_000) fun largeFileDifferingOutsideTheSamplesIsTakenAsTheSame() {
+        // The accepted trade-off of ContentSample: bytes between the samples are not read.
+        upload(local(6, video, "VID.mp4"))
+        val at = 2 shl 20 // past the first 1 MB, before the first middle sample (~2.2 MB)
+        val other = video.copyOf().also { it[at] = (it[at] + 1).toByte() }
+        assertEquals(UploadResult.AlreadyPresent("$dir/VID.mp4"), upload(local(7, other, "VID.mp4")))
+    }
+
+    @Test(timeout = 60_000) fun localFileLongerThanItsSizeIsNotTheSame() {
+        val bytes = ByteArray(5000) { 3 }
+        upload(local(8, bytes))
+        // MediaStore said 5000 bytes, but the file has grown since.
+        val grown = LocalFile(8, "IMG.jpg", 5000) { ByteArrayInputStream(bytes + ByteArray(10)) }
+        // Not taken as already sent; sending it then fails the size check, as it should.
+        val failure = runCatching { upload(grown) }.exceptionOrNull()
+        assertTrue("$failure", failure?.message?.contains("size mismatch") == true)
+    }
+
     @Test(timeout = 60_000) fun emptyFile() {
         assertEquals(UploadResult.Uploaded("$dir/empty.jpg", 0), upload(local(3, ByteArray(0), "empty.jpg")))
         assertEquals(UploadResult.AlreadyPresent("$dir/empty.jpg"), upload(local(3, ByteArray(0), "empty.jpg")))
@@ -132,7 +174,7 @@ class SmbIntegrationTest {
         val moving = CompletableDeferred<Unit>()
         val job = launch(Dispatchers.Default) {
             SmbGateway.withShare(target()) {
-                Uploader(it.disk).upload(big, dir) { sent, _ -> if (sent > 10_000_000) moving.complete(Unit) }
+                Uploader(it.disk).upload(big, dir) { _, sent, _ -> if (sent > 10_000_000) moving.complete(Unit) }
             }
         }
         moving.await()

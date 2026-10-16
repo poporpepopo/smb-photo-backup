@@ -11,6 +11,7 @@ import androidx.work.ForegroundInfo
 import io.github.poporpepopo.photobackup.MainActivity
 import io.github.poporpepopo.photobackup.R
 import io.github.poporpepopo.photobackup.backup.SyncProgress
+import io.github.poporpepopo.photobackup.ui.ProgressText
 
 /** The progress notification shown while a pass runs as a foreground service. */
 class SyncNotifier(private val context: Context) {
@@ -27,8 +28,18 @@ class SyncNotifier(private val context: Context) {
             .setSmallIcon(R.drawable.ic_stat_backup)
             .setContentTitle(context.getString(R.string.notif_sync_title))
             .setContentText(
-                progress?.let { context.getString(R.string.sync_progress, it.index + 1, it.total, it.name) }
-                    ?: context.getString(R.string.sync_preparing),
+                progress?.let { ProgressText.overall(context, it) } ?: context.getString(R.string.sync_preparing),
+            )
+            .setStyle(
+                progress?.let {
+                    NotificationCompat.BigTextStyle().bigText(
+                        listOf(
+                            ProgressText.overall(context, it),
+                            ProgressText.item(context, it),
+                            ProgressText.file(context, it),
+                        ).joinToString("\n"),
+                    )
+                },
             )
             .setProgress(PROGRESS_MAX, progress?.let { (it.overall * PROGRESS_MAX).toInt() } ?: 0, progress == null)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)

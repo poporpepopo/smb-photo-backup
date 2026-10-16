@@ -62,7 +62,14 @@
     <string name="button_sync_now">Sync now</string>
     <string name="sync_preparing">Connecting…</string>
     <string name="sync_progress">%1$d / %2$d: %3$s</string>
-    <string name="sync_file_progress">%1$s / %2$s</string>
+    <string name="sync_overall">Overall %1$s · %2$s</string>
+    <string name="sync_file_sending">Sending %1$s (%2$s / %3$s)</string>
+    <string name="sync_file_comparing">Checking the copy on the router %1$s (%2$s / %3$s)</string>
+    <string name="sync_file_sampling">Checking parts of the copy on the router %1$s (%2$s file)</string>
+    <string name="sync_left_unknown">estimating time left</string>
+    <string name="sync_left_soon">almost done</string>
+    <string name="sync_left_minutes">about %1$d min left (done around %2$s)</string>
+    <string name="sync_left_hours">about %1$d h %2$d min left (done around %3$s)</string>
     <string name="sync_nothing_to_do">Everything is already backed up.</string>
     <string name="sync_summary">Uploaded: %1$d · Already on the share: %2$d · Failed: %3$d</string>
     <string name="sync_item_error">Could not send %1$s: %2$s</string>

@@ -1,5 +1,6 @@
 package io.github.poporpepopo.photobackup.backup
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,6 +57,18 @@ class BoundedInputStreamTest {
         while (s.read(buf, 0, buf.size) >= 0) Unit
         assertTrue(requests.all { (at, len) -> at + len <= 1000 })
         assertTrue(requests.isNotEmpty())
+    }
+
+    @Test fun readsARangeFromAnOffset() {
+        val s = BoundedInputStream(100, start = 900) { buf, at, off, len ->
+            requests += at to len
+            val n = minOf(len, 30)
+            System.arraycopy(file, at.toInt(), buf, off, n)
+            n
+        }
+        assertTrue(streamsEqual(s, ByteArrayInputStream(file, 900, 100)))
+        assertEquals(900L, requests.first().first)
+        assertTrue(requests.all { (at, len) -> at >= 900 && at + len <= 1000 })
     }
 
     @Test fun emptyFileNeverHitsTheServer() {
