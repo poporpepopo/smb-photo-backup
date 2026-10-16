@@ -19,9 +19,30 @@ android {
         versionName = "0.1"
     }
 
+    // The release key lives outside the repository and its password in the macOS
+    // Keychain (see README), so neither is ever written into the project. They are only
+    // looked up when a release task was asked for, so debug builds work without them.
+    val wantsRelease = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+    signingConfigs {
+        create("release") {
+            storeFile = file("${System.getProperty("user.home")}/.android/keystores/photobackup-release.jks")
+            keyAlias = "photobackup"
+            if (wantsRelease) {
+                val password = providers.exec {
+                    commandLine("security", "find-generic-password", "-s", "photobackup-release-keystore", "-a", "release", "-w")
+                }.standardOutput.asText.get().trim()
+                storePassword = password
+                keyPassword = password
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Not debuggable (the default for release): adb cannot run code as this app, so
+            // it cannot use the Keystore key that protects the SMB password.
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

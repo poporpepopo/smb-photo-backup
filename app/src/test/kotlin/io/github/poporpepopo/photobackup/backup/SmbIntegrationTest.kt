@@ -104,6 +104,7 @@ class SmbIntegrationTest {
         val id = listing.serverId
         assertNotNull("test server sends a server ID", id)
         listing.space?.let { (free, total) -> assertTrue(free in 0..total) }
+        assertTrue("a user session is signed", listing.signed)
         val pinned = SmbTarget("127.0.0.1", "USB", "tester", "Dummy-Pass-123", port!!, expectedServerId = id)
         SmbGateway.withShare(pinned) { }
 

@@ -31,12 +31,21 @@ import java.util.concurrent.atomic.AtomicReference
  */
 object SmbGateway {
 
-    private val config: SmbConfig = SmbConfig.builder()
+    /**
+     * Every message is signed and every reply's signature checked, so nobody on the LAN
+     * can alter what we write or what the server tells us. The router speaks SMB 2.0.2,
+     * which has signing but no encryption: contents still cross the Wi-Fi unencrypted.
+     */
+    private val signedConfig: SmbConfig = baseConfig().withSigningRequired(true).build()
+
+    /** A guest session has no key to sign with. */
+    private val guestConfig: SmbConfig = baseConfig().build()
+
+    private fun baseConfig() = SmbConfig.builder()
         .withSecurityProvider(BCSecurityProvider())
         .withTimeout(30, TimeUnit.SECONDS)
         .withSoTimeout(60, TimeUnit.SECONDS)
         .withDfsEnabled(false)
-        .build()
 
     /**
      * Connects, authenticates, opens the share and runs [block] on an IO thread. Any
@@ -121,7 +130,7 @@ object SmbGateway {
         open: AtomicReference<Connection?>,
         block: (OpenShare) -> T,
     ): T =
-        SMBClient(config).use { client ->
+        SMBClient(if (target.username.isBlank()) guestConfig else signedConfig).use { client ->
             client.connect(target.host, target.port).use { conn ->
                 open.set(conn)
                 val serverId = serverIdOf(conn)
@@ -137,7 +146,11 @@ object SmbGateway {
                 val session = conn.authenticate(auth)
                 try {
                     (session.connectShare(target.share) as DiskShare).use { disk ->
-                        block(OpenShare(disk, conn, serverId))
+                        // SMB 3 signs with a derived key, SMB 2 with the session key itself.
+                        val keys = session.sessionContext
+                        val signed = session.isSigningRequired &&
+                            (keys.signingKey ?: keys.sessionKey) != null
+                        block(OpenShare(disk, conn, serverId, signed))
                     }
                 } finally {
                     runCatching { session.close() }
@@ -158,6 +171,8 @@ object SmbGateway {
         private val connection: Connection,
         /** See [SmbTarget.expectedServerId]. */
         val serverId: UUID?,
+        /** Every message in this session is signed (always, except as guest). */
+        val signed: Boolean,
     ) {
         val isAlive: Boolean get() = connection.isConnected && disk.isConnected
     }
@@ -168,6 +183,7 @@ object SmbGateway {
         val serverId: UUID?,
         /** Free and total bytes on the share's disk; null if the server will not say. */
         val space: Pair<Long, Long>?,
+        val signed: Boolean,
     )
 
     /** The connection test: list the share root and check the destination folder. */
@@ -187,6 +203,6 @@ object SmbGateway {
             val exists = folder.isEmpty() || share.stat(RemotePath.toSmb(folder))?.isDirectory == true
             val space = runCatching { share.shareInformation }.getOrNull()
                 ?.let { it.callerFreeSpace to it.totalSpace }
-            ShareListing(folders, exists, open.serverId, space)
+            ShareListing(folders, exists, open.serverId, space, open.signed)
         }
 }

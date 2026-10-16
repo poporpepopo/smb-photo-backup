@@ -92,4 +92,6 @@
     <string name="button_allow_local_network">許可する</string>
     <string name="error_disk_full">ルーターのストレージがいっぱいです。空きを作るか大きいドライブに替えてください。次の同期で続きから送ります。</string>
     <string name="test_free_space">空き容量：%1$s（全体 %2$s）</string>
+    <string name="test_signed">通信は署名つきです（途中で書き換えられません。中身の暗号化はありません）。</string>
+    <string name="test_unsigned">通信に署名がありません（ゲスト接続）。ユーザー名を入れると署名します。</string>
 </resources>

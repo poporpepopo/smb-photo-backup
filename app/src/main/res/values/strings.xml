@@ -92,4 +92,6 @@
     <string name="button_allow_local_network">Allow</string>
     <string name="error_disk_full">The router\'s storage is full. Free up space or use a larger drive; the next sync continues from where this one stopped.</string>
     <string name="test_free_space">Free space: %1$s of %2$s</string>
+    <string name="test_signed">Messages are signed: they cannot be altered on the way. (Contents are not encrypted.)</string>
+    <string name="test_unsigned">Messages are not signed (guest access). Enter a user name to sign them.</string>
 </resources>

@@ -52,6 +52,7 @@ sealed interface TestState {
         val folderExists: Boolean,
         /** Free and total bytes, when the server reports them. */
         val space: Pair<Long, Long>?,
+        val signed: Boolean,
     ) : TestState
     data class Failed(val error: UiError, val host: String) : TestState
 }
@@ -127,7 +128,7 @@ class SettingsViewModel(
             val listing = SmbGateway.probeShare(target, folder)
             // A successful test is the user vouching for this server.
             repo.rememberServer(host, listing.serverId)
-            TestState.Success(host, share, folder, listing.folders, listing.destinationExists, listing.space)
+            TestState.Success(host, share, folder, listing.folders, listing.destinationExists, listing.space, listing.signed)
         } catch (e: SmbFailureException) {
             fail(UiError.Smb(e.failure))
         }

@@ -3,7 +3,7 @@
 Android の写真と動画を、自宅ルーターの USB ストレージ（SMB 共有）へ自動でバックアップするアプリ。
 
 - Kotlin / Jetpack Compose / minSdk 29 / targetSdk 37
-- SMB：smbj（SMB2/3）、NTLM の MD4 は BouncyCastle を直接使う
+- SMB：smbj（SMB2/3）、NTLM の MD4 は BouncyCastle を直接使う。ユーザー名があるときは SMB 署名を必須にする
 - 設定：DataStore。SMB のパスワードは Android Keystore の AES-256-GCM 鍵で暗号化して保存
 
 ## ビルド
@@ -13,6 +13,19 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 ./gradlew assembleDebug testDebugUnitTest
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+### リリース版（普段使い）
+
+デバッグ版は adb からアプリの権限で動かせるので、普段使いはリリース版にします。
+
+```sh
+./gradlew assembleRelease
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+- 署名鍵：`~/.android/keystores/photobackup-release.jks`（リポジトリには入れない）
+- 鍵のパスワード：macOS のキーチェーン（サービス名 `photobackup-release-keystore`、アカウント `release`）。リリースのタスクを実行したときだけ読む
+- デバッグ版とは署名が違うので、上書きでは入れ替えられない（[docs/open-issues.md](docs/open-issues.md) の R19）
 
 実機での確認手順と、ルーターなしでの試し方は [docs/device-testing.md](docs/device-testing.md)。
 

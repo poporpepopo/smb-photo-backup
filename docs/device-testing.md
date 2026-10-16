@@ -147,6 +147,8 @@ adb shell am get-standby-bucket io.github.poporpepopo.photobackup
 | 9 | 撮影日時にタイムゾーンの無い古い写真（他のカメラの JPEG など）をスマホに入れて同期 | 撮影月のフォルダ（例 `2019/08`）に入る（C13） |
 | 10 | 外出先の Wi-Fi で「今すぐ同期」 | 「ルーターに届きません」（多くの場合）。同じ IP に別の SMB 機器がある場所なら「別の SMB サーバーが応答しました…ログインせずに中止しました」 |
 | 11 | フェーズ1の「ログ確認」と「保存データ確認」 | パスワードが出ていない |
+| 12 | 接続テスト | 結果に「通信は署名つきです」と空き容量が出る |
+| 13 | リリース版を入れる（R19 のとおり、デバッグ版のアンインストールが要る）→ `adb shell run-as io.github.poporpepopo.photobackup ls` | `run-as: package not debuggable` で拒否される |
 
 ### 別のサーバーへの照合を試す（Mac・エミュレータ）
 

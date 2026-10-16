@@ -208,6 +208,7 @@ private fun TestResult(state: TestState) {
                     ),
                 )
             }
+            Text(stringResource(if (state.signed) R.string.test_signed else R.string.test_unsigned))
             state.space?.let { (free, total) ->
                 val context = LocalContext.current
                 Text(
