@@ -25,7 +25,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 - 署名鍵：`~/.android/keystores/photobackup-release.jks`（リポジトリには入れない）
 - 鍵のパスワード：macOS のキーチェーン（サービス名 `photobackup-release-keystore`、アカウント `release`）。リリースのタスクを実行したときだけ読む
-- デバッグ版とは署名が違うので、上書きでは入れ替えられない（[docs/open-issues.md](docs/open-issues.md) の R19）
+- デバッグ版とは署名が違うので、上書きでは入れ替えられない。入れ替えるにはデバッグ版をアンインストールする必要があり、設定・パスワード・送信済みの記録が消える
 
 実機での確認手順と、ルーターなしでの試し方は [docs/device-testing.md](docs/device-testing.md)。
 
@@ -61,8 +61,6 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 - 接続が生きたままの失敗（その1件が読めない、共有側で名前がぶつかって作れない等）は、その1件だけ失敗として数えて残りを続ける
 - 送信済みの記録は1件送るごとに書くので、途中でアプリが終了しても失うのは送信中の1件だけ
 - 定期実行は、ルーターに届かない（家にいない）、設定が無い、接続が切れた、のどれでも「成功」で終える。再試行は WorkManager に任せず、次の15分後の回で続きを送る
-
-懸念点・確認点は [docs/open-issues.md](docs/open-issues.md) にまとめています。
 
 バックアップと機種変更時の転送はどちらも無効にしています。暗号化したパスワードは
 この端末の Keystore 鍵でしか復号できず、移しても使えないためです。
