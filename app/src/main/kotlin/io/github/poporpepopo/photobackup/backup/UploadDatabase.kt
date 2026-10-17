@@ -35,6 +35,13 @@ interface UploadedDao {
 
     @Upsert
     fun upsert(record: UploadedRecord)
+
+    @Query("SELECT COUNT(*) FROM uploaded")
+    fun count(): Int
+
+    /** Forgets every upload; the next pass sends everything not found on the share. */
+    @Query("DELETE FROM uploaded")
+    fun clear(): Int
 }
 
 /**

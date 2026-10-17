@@ -61,7 +61,31 @@ class SettingsViewModel(
     private val repo: SettingsRepository,
     /** Whether Android lets us reach the LAN at all (a runtime permission on 17+). */
     private val localNetworkAllowed: () -> Boolean,
+    private val records: UploadRecords,
 ) : ViewModel() {
+
+    /** The upload records, as far as the settings screen needs them. */
+    interface UploadRecords {
+        suspend fun count(): Int
+
+        /** False while a pass is running. */
+        suspend fun forget(): Boolean
+    }
+
+    private val _recordCount = MutableStateFlow<Int?>(null)
+    val recordCount: StateFlow<Int?> = _recordCount.asStateFlow()
+
+    fun refreshRecordCount() {
+        viewModelScope.launch { _recordCount.value = records.count() }
+    }
+
+    fun forgetRecords(onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val done = records.forget()
+            _recordCount.value = records.count()
+            onDone(done)
+        }
+    }
 
     private val _form = MutableStateFlow(SettingsForm())
     val form: StateFlow<SettingsForm> = _form.asStateFlow()

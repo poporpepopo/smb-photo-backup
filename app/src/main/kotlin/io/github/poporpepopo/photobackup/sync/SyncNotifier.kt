@@ -44,6 +44,16 @@ class SyncNotifier(private val context: Context) {
             .setProgress(PROGRESS_MAX, progress?.let { (it.overall * PROGRESS_MAX).toInt() } ?: 0, progress == null)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setContentIntent(open)
+            .addAction(
+                0,
+                context.getString(R.string.button_stop_sync),
+                PendingIntent.getBroadcast(
+                    context,
+                    0,
+                    Intent(context, StopSyncReceiver::class.java),
+                    PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)

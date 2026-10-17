@@ -10,9 +10,11 @@ import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.share.File
 import io.github.poporpepopo.photobackup.smb.RemotePath
 import io.github.poporpepopo.photobackup.smb.stat
-import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 
 sealed interface UploadResult {
     /** Share-relative "/"-separated path of the file as it now exists on the share. */
@@ -30,16 +32,6 @@ class LocalFile(
     val open: () -> InputStream,
 )
 
-/** What the bytes reported by [Uploader.upload]'s progress are doing. */
-enum class Transfer {
-    /** Reading back a same-sized file on the share to see whether it is this item. */
-    Comparing,
-
-    /** As [Comparing], but only the parts [ContentSample] picks, for a large file. */
-    Sampling,
-    Sending,
-}
-
 /** Told when a temporary file may be left on the share and when it is gone again. */
 interface TempFiles {
     fun created(path: String)
@@ -54,7 +46,7 @@ interface TempFiles {
 /**
  * Writes one file to the share so that the final name only ever holds a complete copy:
  *
- * 1. pick a name: the original, or "name (n).ext" if a different file has it
+ * 1. pick a name: the original, or "name (n).ext" if a file of another size has it
  * 2. write everything to a hidden temporary file
  * 3. check the temporary file's size on the server against the bytes we sent
  * 4. rename it to the chosen name, refusing to overwrite
@@ -72,10 +64,10 @@ class Uploader(
     fun upload(
         local: LocalFile,
         directory: String,
-        onProgress: (transfer: Transfer, done: Long, total: Long) -> Unit = { _, _, _ -> },
+        onProgress: (sent: Long, total: Long) -> Unit = { _, _ -> },
     ): UploadResult {
         mkdirs(directory)
-        val dir = ShareDirectory(share, directory, local, onActivity, onProgress)
+        val dir = ShareDirectory(share, directory)
 
         var resolution = NameResolver.resolve(dir, local.name, local.size)
         if (resolution is NameResolution.AlreadyPresent) {
@@ -157,12 +149,15 @@ class Uploader(
         }
     }
 
-    private fun writeTemp(
-        path: String,
-        local: LocalFile,
-        onProgress: (Transfer, Long, Long) -> Unit,
-    ): Long {
-        var sent = 0L
+    /**
+     * Sends the file without waiting for each write's reply before the next. The router
+     * takes at most 64 KB per write, and waiting a round trip after every one capped the
+     * phone at about 5 MB/s where a Mac with the same router reached 13 MB/s.
+     *
+     * Progress counts only bytes the server has confirmed, so 100 % means it has them all.
+     */
+    private fun writeTemp(path: String, local: LocalFile, onProgress: (Long, Long) -> Unit): Long {
+        var confirmed = 0L
         share.openFile(
             RemotePath.toSmb(path),
             setOf(AccessMask.GENERIC_WRITE),
@@ -171,23 +166,51 @@ class Uploader(
             SMB2CreateDisposition.FILE_OVERWRITE_IF,
             setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
         ).use { file ->
-            file.outputStream.use { out ->
-                local.open().use { input ->
-                    val buf = ByteArray(BUFFER_BYTES)
-                    onProgress(Transfer.Sending, 0, local.size)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        sent += n
-                        onActivity()
-                        onProgress(Transfer.Sending, sent, local.size)
+            local.open().use { input ->
+                val pending = ArrayDeque<PendingWrite>()
+                val spare = ArrayDeque<ByteArray>()
+
+                fun settle(w: PendingWrite) {
+                    val written = try {
+                        w.result.get(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    } catch (e: ExecutionException) {
+                        // A refused write comes back from the async path as a bare "wrote
+                        // 0 bytes". Writing it again the plain way either succeeds or throws
+                        // with the server's status, so a full disk is still told apart.
+                        file.write(w.buffer, w.offset, 0, w.length)
                     }
+                    if (written != w.length.toLong()) {
+                        throw IOException("short write at ${w.offset}: $written of ${w.length}")
+                    }
+                    confirmed += w.length
+                    spare += w.buffer
+                    onActivity()
+                    onProgress(confirmed, local.size)
                 }
+
+                onProgress(0, local.size)
+                var queued = 0L
+                while (true) {
+                    val buf = spare.removeFirstOrNull() ?: ByteArray(CHUNK_BYTES)
+                    val n = readFully(input, buf)
+                    if (n == 0) break
+                    pending += PendingWrite(buf, queued, n, file.writeAsync(buf, queued, 0, n))
+                    queued += n
+                    if (pending.size >= MAX_PENDING) settle(pending.removeFirst())
+                }
+                while (pending.isNotEmpty()) settle(pending.removeFirst())
             }
         }
-        return sent
+        return confirmed
     }
+
+    /** One chunk on its way; [buffer] must not be reused until [result] is done. */
+    private class PendingWrite(
+        val buffer: ByteArray,
+        val offset: Long,
+        val length: Int,
+        val result: Future<Long>,
+    )
 
     /** False if [to] already exists; any other failure is thrown. */
     private fun rename(from: String, to: String): Boolean {
@@ -211,126 +234,21 @@ class Uploader(
     )
 
     private companion object {
-        const val BUFFER_BYTES = 1 shl 20
+        /** smbj splits each chunk into writes of the size the server allows (64 KB here). */
+        const val CHUNK_BYTES = 1 shl 20
+
+        /** Chunks in flight: up to 3 MB, about 48 writes, before waiting for the oldest. */
+        const val MAX_PENDING = 3
+
+        /** Longer than the router's pauses while it flushes to its disk (about 30 s). */
+        const val WRITE_TIMEOUT_SECONDS = 90L
         const val RENAME_ATTEMPTS = 3
 
         fun join(dir: String, name: String) = if (dir.isEmpty()) name else "$dir/$name"
     }
 }
 
-/** [RemoteDirectory] backed by a directory on the share, comparing against [local]. */
-private class ShareDirectory(
-    private val share: DiskShare,
-    private val directory: String,
-    private val local: LocalFile,
-    private val onActivity: () -> Unit,
-    private val onCompared: (Transfer, done: Long, total: Long) -> Unit,
-) : RemoteDirectory {
-
-    private fun smbPath(name: String) =
-        RemotePath.toSmb(if (directory.isEmpty()) name else "$directory/$name")
-
-    override fun sizeOf(name: String): Long? {
-        val entry = share.stat(smbPath(name)) ?: return null
-        return if (entry.isDirectory) -1L else entry.size
-    }
-
-    override fun sameContentAsLocal(name: String): Boolean =
-        share.openFile(
-            smbPath(name),
-            setOf(AccessMask.GENERIC_READ),
-            null,
-            SMB2ShareAccess.ALL,
-            SMB2CreateDisposition.FILE_OPEN,
-            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
-        ).use { file ->
-            val ranges = ContentSample.ranges(local.size)
-            val total = ranges.sumOf { (start, end) -> end - start }
-            val transfer = if (ContentSample.isPartial(local.size)) Transfer.Sampling else Transfer.Comparing
-            var compared = 0L
-            local.open().use { mine ->
-                var at = 0L
-                for ((start, end) in ranges) {
-                    skipFully(mine, start - at)
-                    // Not file.inputStream: it reads ahead past the end of the file, and
-                    // some servers answer that read with a reply smbj cannot parse. Read
-                    // exactly the range with positional reads.
-                    val remote = BoundedInputStream(end - start, start) { buf, pos, off, len ->
-                        file.read(buf, pos, off, len).also { n ->
-                            onActivity()
-                            if (n > 0) {
-                                compared += n
-                                // Reported against the whole file, so the pass's byte count
-                                // moves on by the item's size when it is done.
-                                onCompared(transfer, local.size * compared / total, local.size)
-                            }
-                        }
-                    }
-                    // [mine] is sequential and already at [start].
-                    val ours = BoundedInputStream(end - start, start) { buf, _, off, len -> mine.read(buf, off, len) }
-                    if (!streamsEqual(remote, ours)) return@use false
-                    at = end
-                }
-                // The ranges end at local.size; a longer file here is not the same file.
-                mine.read() < 0
-            }
-        }
-}
-
-/** Skips [n] bytes; a file stream does it by seeking, without reading them. */
-private fun skipFully(input: InputStream, n: Long) {
-    var left = n
-    while (left > 0) {
-        val skipped = input.skip(left)
-        if (skipped > 0) {
-            left -= skipped
-        } else {
-            if (input.read() < 0) throw EOFException("local file ended early")
-            left--
-        }
-    }
-}
-
-/**
- * Exposes [size] bytes from [start] behind [readAt] (a positional read: buffer, file
- * offset, buffer offset, length) as an InputStream, never asking for anything past them.
- */
-internal class BoundedInputStream(
-    size: Long,
-    start: Long = 0,
-    private val readAt: (ByteArray, Long, Int, Int) -> Int,
-) : InputStream() {
-    private var position = start
-    private val end = start + size
-
-    override fun read(): Int {
-        val one = ByteArray(1)
-        return if (read(one, 0, 1) <= 0) -1 else one[0].toInt() and 0xFF
-    }
-
-    override fun read(b: ByteArray, off: Int, len: Int): Int {
-        if (len == 0) return 0
-        if (position >= end) return -1
-        val n = readAt(b, position, off, minOf(len.toLong(), end - position).toInt())
-        if (n <= 0) return -1
-        position += n
-        return n
-    }
-}
-
-internal fun streamsEqual(a: InputStream, b: InputStream): Boolean {
-    val bufA = ByteArray(64 * 1024)
-    val bufB = ByteArray(64 * 1024)
-    while (true) {
-        val n = readFully(a, bufA)
-        val m = readFully(b, bufB)
-        if (n != m) return false
-        if (n == 0) return true
-        for (i in 0 until n) if (bufA[i] != bufB[i]) return false
-    }
-}
-
-/** Fills [buf] as far as the stream allows; SMB reads return short chunks. */
+/** Fills [buf] as far as the stream allows; 0 at the end. */
 private fun readFully(input: InputStream, buf: ByteArray): Int {
     var total = 0
     while (total < buf.size) {
@@ -339,4 +257,17 @@ private fun readFully(input: InputStream, buf: ByteArray): Int {
         total += n
     }
     return total
+}
+
+/** [RemoteDirectory] backed by a directory on the share. */
+private class ShareDirectory(
+    private val share: DiskShare,
+    private val directory: String,
+) : RemoteDirectory {
+
+    override fun sizeOf(name: String): Long? {
+        val entry = share.stat(RemotePath.toSmb(if (directory.isEmpty()) name else "$directory/$name"))
+            ?: return null
+        return if (entry.isDirectory) -1L else entry.size
+    }
 }

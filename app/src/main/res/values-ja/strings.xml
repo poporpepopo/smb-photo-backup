@@ -64,8 +64,6 @@
     <string name="sync_progress">%1$d / %2$d：%3$s</string>
     <string name="sync_overall">全体 %1$s・%2$s</string>
     <string name="sync_file_sending">送信中 %1$s（%2$s / %3$s）</string>
-    <string name="sync_file_comparing">ルーターの同じファイルと照合中 %1$s（%2$s / %3$s）</string>
-    <string name="sync_file_sampling">ルーターの同じファイルと一部を照合中 %1$s（%2$s のファイル）</string>
     <string name="sync_left_unknown">残り時間を計算中</string>
     <string name="sync_left_soon">まもなく完了</string>
     <string name="sync_left_minutes">残り約%1$d分（%2$sごろ完了）</string>
@@ -101,4 +99,16 @@
     <string name="test_free_space">空き容量：%1$s（全体 %2$s）</string>
     <string name="test_signed">通信は署名つきです（途中で書き換えられません。中身の暗号化はありません）。</string>
     <string name="test_unsigned">通信に署名がありません（ゲスト接続）。ユーザー名を入れると署名します。</string>
+    <string name="button_stop_sync">中止</string>
+    <string name="sync_stopped">中止しました。次の自動バックアップは予定どおり動きます。</string>
+    <string name="records_title">送信済みの記録</string>
+    <plurals name="records_text">
+        <item quantity="other">%1$d 件を送信済みとして記録しています。ルーターのディスクを取り替えたときは記録を消してください。次の同期ですべて送り直します（同じ名前・同じサイズのファイルが保存先にあれば送りません）。</item>
+    </plurals>
+    <string name="records_clear">記録を消す</string>
+    <string name="records_confirm_title">送信済みの記録を消しますか？</string>
+    <string name="records_confirm_text">スマホとルーターのファイルは何も消えません。次の同期で、すべての写真・動画を確かめ直し、保存先に無いものを送ります。</string>
+    <string name="records_cleared">記録を消しました。</string>
+    <string name="records_busy">同期の最中です。先に中止してください。</string>
+    <string name="cancel">キャンセル</string>
 </resources>

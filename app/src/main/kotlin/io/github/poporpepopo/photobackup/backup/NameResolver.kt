@@ -4,16 +4,13 @@ package io.github.poporpepopo.photobackup.backup
 interface RemoteDirectory {
     /** Size of the file [name] in this directory, -1 if it is a directory, null if absent. */
     fun sizeOf(name: String): Long?
-
-    /** True if the existing file [name] has exactly the bytes of the local item. */
-    fun sameContentAsLocal(name: String): Boolean
 }
 
 sealed interface NameResolution {
     /** Nothing is called [name] yet: upload under it. */
     data class Upload(val name: String) : NameResolution
 
-    /** An identical file is already there, e.g. after the app was reinstalled. */
+    /** A file of the same name and size is already there, e.g. after the app was reinstalled. */
     data class AlreadyPresent(val name: String) : NameResolution
 }
 
@@ -22,8 +19,12 @@ object NameResolver {
 
     /**
      * Walks "IMG.jpg", "IMG (1).jpg", "IMG (2).jpg", ... and stops at the first name that
-     * is free or already holds the same content. Contents are only compared when the sizes
-     * match, so a differing file costs one metadata lookup.
+     * is free or already holds a file of the same size, which is taken to be this item.
+     *
+     * Contents are not compared: reading a copy back costs as much Wi-Fi time as sending
+     * it, and after a reinstall every item already sent would be read back once. Camera
+     * file names carry the capture time to the millisecond, so a different file with the
+     * same name and the same byte count is not a case worth that.
      */
     fun resolve(
         dir: RemoteDirectory,
@@ -33,7 +34,7 @@ object NameResolver {
         for (n in 0 until MAX_ATTEMPTS) {
             val candidate = Destination.candidateName(desiredName, n)
             val size = dir.sizeOf(candidate) ?: return NameResolution.Upload(candidate)
-            if (size == localSize && dir.sameContentAsLocal(candidate)) {
+            if (size == localSize) {
                 return NameResolution.AlreadyPresent(candidate)
             }
         }

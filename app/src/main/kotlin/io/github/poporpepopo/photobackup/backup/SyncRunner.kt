@@ -12,7 +12,11 @@ import io.github.poporpepopo.photobackup.smb.LocalNetworkAccess
 import io.github.poporpepopo.photobackup.smb.SmbFailure
 import io.github.poporpepopo.photobackup.smb.SmbFailureException
 import io.github.poporpepopo.photobackup.smb.SmbGateway
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -32,8 +36,7 @@ data class SyncProgress(
     val index: Int,
     val total: Int,
     val name: String,
-    val transfer: Transfer,
-    /** Bytes of the item in hand compared or sent so far, out of [size]. */
+    /** Bytes of the item in hand sent so far, out of [size]. */
     val sent: Long,
     val size: Long,
     /** Bytes of the items before this one, out of all items in the pass. */
@@ -84,6 +87,9 @@ sealed interface SyncOutcome {
 
     /** The connection failed part-way; items before it are recorded. */
     data class Aborted(val failure: SmbFailure, val summary: SyncSummary) : SyncOutcome
+
+    /** Ended by [SyncRunner.stop]; items before it are recorded. */
+    data class Stopped(val summary: SyncSummary) : SyncOutcome
 }
 
 enum class NotReadyReason { NoPermission, NoLocalNetwork, NotConfigured, PasswordUnreadable }
@@ -121,19 +127,72 @@ class SyncRunner(
         (items.size - pending.size) to pending.size
     }
 
+    /** The pass in progress, so [stop] can end it without touching the worker running it. */
+    @Volatile private var pass: Job? = null
+    @Volatile private var stopRequested = false
+
     /** One backup pass, or null if another pass is already running. */
     suspend fun run(): SyncOutcome? {
         if (!lock.tryLock()) return null
         try {
             _state.value = RunState.Preparing
-            return runPass()
+            stopRequested = false
+            val tally = Tally()
+            return coroutineScope {
+                val job = async { runPass(tally) }
+                pass = job
+                try {
+                    job.await()
+                } catch (e: CancellationException) {
+                    // Cancelling the child leaves this scope running. If the worker itself
+                    // is being cancelled (WorkManager stopping it), let that through.
+                    ensureActive()
+                    if (!stopRequested) throw e
+                    SyncOutcome.Stopped(tally.summary)
+                } finally {
+                    pass = null
+                }
+            }
         } finally {
             _state.value = RunState.Idle
             lock.unlock()
         }
     }
 
-    private suspend fun runPass(): SyncOutcome {
+    /**
+     * Ends the pass in progress, if any, as promptly as a cancellation does (the item in
+     * flight is dropped; its temporary file is cleaned up later). Only this pass: the
+     * periodic schedule is left alone, so the next period runs as usual.
+     */
+    fun stop() {
+        val job = pass ?: return
+        stopRequested = true
+        job.cancel()
+    }
+
+    /** Uploaded records, for the settings screen. */
+    suspend fun uploadedCount(): Int = withContext(Dispatchers.IO) { dao.count() }
+
+    /**
+     * Forgets every upload, e.g. after the share's disk was replaced. Refused (false)
+     * while a pass runs, since it would record items again as it goes.
+     */
+    suspend fun forgetUploads(): Boolean {
+        if (!lock.tryLock()) return false
+        try {
+            withContext(Dispatchers.IO) { dao.clear() }
+            return true
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    /** What a pass has done so far, readable after it was stopped. */
+    private class Tally {
+        @Volatile var summary = SyncSummary()
+    }
+
+    private suspend fun runPass(tally: Tally): SyncOutcome {
         val ready = when (val t = settings.target()) {
             is TargetResult.Ready -> t
             TargetResult.NotConfigured -> return SyncOutcome.NotReady(NotReadyReason.NotConfigured)
@@ -159,12 +218,11 @@ class SyncRunner(
         val leftovers = withContext(Dispatchers.IO) { partials.all() }
         if (pending.isEmpty() && leftovers.isEmpty()) return SyncOutcome.Finished(SyncSummary())
 
-        var summary = SyncSummary()
         var seenServerId: UUID? = null
         val totalBytes = pending.sumOf { it.size }
         var doneBytes = 0L
-        // Progress made by reading back or writing, for the rate. A sampled comparison
-        // counts as the whole file. doneBytes also jumps over items that failed.
+        // Bytes actually written, for the rate. doneBytes also jumps over items that were
+        // already on the share or failed.
         var moved = 0L
         val meter = RateMeter()
         try {
@@ -188,27 +246,28 @@ class SyncRunner(
                         touch()
                         val name = Destination.sanitizeFileName(item.displayName, "media_${item.id}")
                         var last = 0L
+                        fun report(sent: Long, size: Long) {
+                            moved += sent - last
+                            last = sent
+                            val left = (totalBytes - doneBytes - sent).coerceAtLeast(0)
+                            _state.value = RunState.Sending(
+                                SyncProgress(
+                                    index, pending.size, name, sent, size, doneBytes, totalBytes,
+                                    meter.remainingMillis(clock(), moved, left),
+                                ),
+                            )
+                        }
+                        // Shown even when the item turns out to be on the share already.
+                        report(0, item.size)
                         try {
-                            val result = sendOne(uploader, item, name, s.folder) { transfer, sent, size ->
-                                // Each comparison and the upload count from 0 again.
-                                moved += if (sent >= last) sent - last else sent
-                                last = sent
-                                val left = (totalBytes - doneBytes - sent).coerceAtLeast(0)
-                                _state.value = RunState.Sending(
-                                    SyncProgress(
-                                        index, pending.size, name, transfer, sent, size,
-                                        doneBytes, totalBytes,
-                                        meter.remainingMillis(clock(), moved, left),
-                                    ),
-                                )
-                            }
+                            val result = sendOne(uploader, item, name, s.folder, ::report)
                             dao.upsert(
                                 UploadedRecord(item.id, item.size, item.dateModifiedSeconds, result.path, clock()),
                             )
-                            summary = when (result) {
-                                is UploadResult.Uploaded -> summary.copy(uploaded = summary.uploaded + 1)
-                                is UploadResult.AlreadyPresent ->
-                                    summary.copy(alreadyPresent = summary.alreadyPresent + 1)
+                            val done = tally.summary
+                            tally.summary = when (result) {
+                                is UploadResult.Uploaded -> done.copy(uploaded = done.uploaded + 1)
+                                is UploadResult.AlreadyPresent -> done.copy(alreadyPresent = done.alreadyPresent + 1)
                             }
                         } catch (e: Exception) {
                             // Cancelled (interrupted mid-call) or a dead connection ends the
@@ -220,8 +279,8 @@ class SyncRunner(
                             if (SmbFailure.classify(e) == SmbFailure.DiskFull) {
                                 throw SmbFailureException(SmbFailure.DiskFull, e)
                             }
-                            summary = summary.copy(
-                                failed = summary.failed + 1,
+                            tally.summary = tally.summary.copy(
+                                failed = tally.summary.failed + 1,
                                 lastItemError = ItemError(name, describe(e)),
                             )
                         } finally {
@@ -231,7 +290,7 @@ class SyncRunner(
                 }
             }
         } catch (e: SmbFailureException) {
-            return SyncOutcome.Aborted(e.failure, summary)
+            return SyncOutcome.Aborted(e.failure, tally.summary)
         } finally {
             // Settings saved before server IDs were remembered: trust the first server we
             // log in to, as the connection test would have.
@@ -241,7 +300,7 @@ class SyncRunner(
             }
         }
         currentCoroutineContext().ensureActive()
-        return SyncOutcome.Finished(summary)
+        return SyncOutcome.Finished(tally.summary)
     }
 
     private val tempRecords = object : TempFiles {
@@ -254,7 +313,7 @@ class SyncRunner(
         item: MediaItem,
         name: String,
         folder: String,
-        onProgress: (Transfer, Long, Long) -> Unit,
+        onProgress: (Long, Long) -> Unit,
     ): UploadResult {
         val size = local { media.originalSize(item) }
         val file = LocalFile(item.id, name, size) { local { media.openOriginal(item) } }

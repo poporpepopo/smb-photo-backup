@@ -43,8 +43,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 | `media/MediaStoreSource.kt` | 写真・動画の一覧と、GPS を削られていない元データの読み出し（読み取り専用） |
 | `media/MediaPermissions.kt` | 全件・限定（Android 14+）・なし の判定と、要求する権限の一覧 |
 | `backup/Destination.kt` | 保存先 `<フォルダ>/年/月`（撮影日時が無ければ EXIF の撮影月）、ファイル名の無害化、`名前 (n).拡張子` の連番 |
-| `backup/NameResolver.kt` | 同名があれば中身を比べ、同じなら送信済み、違えば次の連番 |
-| `backup/ContentSample.kt` | 比べる範囲。16MB 以下は全部、それより大きいファイルは先頭・末尾と途中8か所だけ |
+| `backup/NameResolver.kt` | 同名があればサイズを比べ、同じなら送信済み、違えば次の連番 |
 | `backup/Uploader.kt` | 一時ファイルに書く → サーバー上のサイズを確認 → 上書き禁止でリネーム。残った一時ファイルは次の回に消す |
 | `backup/UploadDatabase.kt` | 送信済みの記録（Room）。MediaStore の ID・サイズ・更新日時と、共有上のパス。消し損ねた一時ファイルの記録も持つ |
 | `backup/SyncPlanner.kt` | 送信済み判定。サイズか更新日時が変わっていれば編集されたとみなして再送 |
@@ -52,6 +51,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 | `backup/StallGuard.kt` | データの動きが2分止まったら打ち切る。smbj のタイムアウトが効かない止まり方への備え |
 | `sync/SyncScheduler.kt` | 15分ごとの定期ジョブ（従量制でない回線、設定により充電中のみ）と「今すぐ同期」 |
 | `sync/SyncWorker.kt` | WorkManager から1回の同期を呼ぶ。送るものがあればフォアグラウンドに切り替えて進捗を通知 |
+| `sync/StopSyncReceiver.kt` | 通知の「中止」。いま動いている回だけを止める（15分ごとの予定は残す） |
 | `sync/SyncStatusStore.kt` | 最終同期の日時、前回の結果、直近のエラーの保存 |
 | `ui/` | ホーム（状態画面と、必要なときだけ出る権限・電池の最適化・通知のカード）と設定画面 |
 

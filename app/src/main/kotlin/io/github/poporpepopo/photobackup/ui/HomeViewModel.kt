@@ -136,6 +136,8 @@ class HomeViewModel(private val app: PhotoBackupApp) : ViewModel() {
         SyncScheduler.syncNow(app)
     }
 
+    fun stopSync() = app.syncRunner.stop()
+
     override fun onCleared() {
         app.contentResolver.unregisterContentObserver(observer)
     }

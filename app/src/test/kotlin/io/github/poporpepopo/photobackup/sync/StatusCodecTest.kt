@@ -28,6 +28,8 @@ class StatusCodecTest {
             SyncOutcome.Finished(SyncSummary()),
             SyncOutcome.NotHome,
             SyncOutcome.Aborted(SmbFailure.Other("size mismatch"), summary),
+            SyncOutcome.Stopped(summary),
+            SyncOutcome.Stopped(SyncSummary()),
         ) + listOf(
             SmbFailure.Unreachable, SmbFailure.Timeout, SmbFailure.ConnectionLost,
             SmbFailure.AuthFailed, SmbFailure.ShareNotFound, SmbFailure.AccessDenied, SmbFailure.WrongServer, SmbFailure.DiskFull,
@@ -38,6 +40,13 @@ class StatusCodecTest {
             record(i.toLong(), o)
             assertEquals(RunRecord(i.toLong(), o), status.lastRun)
         }
+    }
+
+    @Test fun aStopIsNeitherASyncNorAnError() {
+        record(100, SyncOutcome.Finished(SyncSummary(uploaded = 2)))
+        record(200, SyncOutcome.Stopped(SyncSummary(uploaded = 1)))
+        assertEquals(100L, status.lastSyncAt)
+        assertEquals(null, status.lastError)
     }
 
     @Test fun finishedPassSetsLastSyncTime() {

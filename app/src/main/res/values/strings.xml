@@ -64,8 +64,6 @@
     <string name="sync_progress">%1$d / %2$d: %3$s</string>
     <string name="sync_overall">Overall %1$s · %2$s</string>
     <string name="sync_file_sending">Sending %1$s (%2$s / %3$s)</string>
-    <string name="sync_file_comparing">Checking the copy on the router %1$s (%2$s / %3$s)</string>
-    <string name="sync_file_sampling">Checking parts of the copy on the router %1$s (%2$s file)</string>
     <string name="sync_left_unknown">estimating time left</string>
     <string name="sync_left_soon">almost done</string>
     <string name="sync_left_minutes">about %1$d min left (done around %2$s)</string>
@@ -101,4 +99,17 @@
     <string name="test_free_space">Free space: %1$s of %2$s</string>
     <string name="test_signed">Messages are signed: they cannot be altered on the way. (Contents are not encrypted.)</string>
     <string name="test_unsigned">Messages are not signed (guest access). Enter a user name to sign them.</string>
+    <string name="button_stop_sync">Stop</string>
+    <string name="sync_stopped">Stopped. The next automatic backup runs as scheduled.</string>
+    <string name="records_title">Upload records</string>
+    <plurals name="records_text">
+        <item quantity="one">%1$d item is recorded as uploaded. If you replaced the disk on the router, clear the records: the next sync sends everything again, skipping files of the same name and size already on the share.</item>
+        <item quantity="other">%1$d items are recorded as uploaded. If you replaced the disk on the router, clear the records: the next sync sends everything again, skipping files of the same name and size already on the share.</item>
+    </plurals>
+    <string name="records_clear">Clear records</string>
+    <string name="records_confirm_title">Clear the upload records?</string>
+    <string name="records_confirm_text">Nothing is deleted from the phone or the router. The next sync checks every photo and video again and sends the ones not on the share.</string>
+    <string name="records_cleared">Records cleared.</string>
+    <string name="records_busy">A sync is running. Stop it first.</string>
+    <string name="cancel">Cancel</string>
 </resources>

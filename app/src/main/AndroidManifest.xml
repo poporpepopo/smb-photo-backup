@@ -60,5 +60,10 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <!-- The progress notification's "Stop" action. -->
+        <receiver
+            android:name=".sync.StopSyncReceiver"
+            android:exported="false" />
     </application>
 </manifest>

@@ -73,7 +73,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         // Cards that need the user come first; each disappears once it is dealt with.
         state.permission?.takeUnless { it.readyForBackup }?.let { PermissionCard(it, onResult = vm::refresh) }
         if (!state.localNetworkAllowed) LocalNetworkCard(onResult = vm::refresh)
-        SyncCard(state, onSync = vm::syncNow)
+        SyncCard(state, onSync = vm::syncNow, onStop = vm::stopSync)
         if (!state.batteryUnrestricted) BatteryCard()
         if (!state.notificationsAllowed) NotificationCard(onResult = vm::refresh)
     }
@@ -211,7 +211,7 @@ private fun openAppSettings(context: Context) {
 }
 
 @Composable
-private fun SyncCard(state: HomeState, onSync: () -> Unit) {
+private fun SyncCard(state: HomeState, onSync: () -> Unit, onStop: () -> Unit) {
     val context = LocalContext.current
     fun time(millis: Long) = DateUtils.formatDateTime(
         context,
@@ -271,10 +271,15 @@ private fun SyncCard(state: HomeState, onSync: () -> Unit) {
             }
         }
 
-        Button(
-            onClick = onSync,
-            enabled = state.permission?.access != MediaAccess.None && run == RunState.Idle && !state.queued,
-        ) { Text(stringResource(R.string.button_sync_now)) }
+        if (run == RunState.Idle) {
+            Button(
+                onClick = onSync,
+                enabled = state.permission?.access != MediaAccess.None && !state.queued,
+            ) { Text(stringResource(R.string.button_sync_now)) }
+        } else {
+            // Ends this pass only; the next automatic one still runs.
+            OutlinedButton(onClick = onStop) { Text(stringResource(R.string.button_stop_sync)) }
+        }
 
         when (run) {
             RunState.Preparing -> {
@@ -311,6 +316,10 @@ private fun OutcomeText(outcome: SyncOutcome) {
             Text(errorText(UiError.Smb(outcome.failure), host = ""))
             outcome.summary
         }
+        is SyncOutcome.Stopped -> {
+            Text(stringResource(R.string.sync_stopped))
+            outcome.summary
+        }
         SyncOutcome.NotHome -> {
             Text(stringResource(R.string.sync_not_home))
             null
@@ -332,7 +341,7 @@ private fun OutcomeText(outcome: SyncOutcome) {
     } ?: return
 
     if (summary == SyncSummary()) {
-        // An abort before the first item has nothing to add to its error.
+        // An abort or stop before the first item has nothing to add to its message.
         if (outcome is SyncOutcome.Finished) Text(stringResource(R.string.sync_nothing_to_do))
         return
     }

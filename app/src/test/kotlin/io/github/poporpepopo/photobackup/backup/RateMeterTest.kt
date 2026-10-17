@@ -48,7 +48,7 @@ class RateMeterTest {
     @Test fun overallProgressCountsBytesNotItems() {
         // One 1 KB photo done, a 99 KB video half sent: half of the items, but ~50 % of bytes.
         val p = SyncProgress(
-            index = 1, total = 2, name = "v.mp4", transfer = Transfer.Sending,
+            index = 1, total = 2, name = "v.mp4",
             sent = 49_500, size = 99_000, doneBytes = 1_000, totalBytes = 100_000,
             remainingMillis = null,
         )

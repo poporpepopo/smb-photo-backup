@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -30,18 +32,22 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -56,7 +62,16 @@ fun SettingsScreen(snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
     val app = LocalContext.current.applicationContext as PhotoBackupApp
     val vm: SettingsViewModel = viewModel(
         factory = viewModelFactory {
-            initializer { SettingsViewModel(app.settings) { LocalNetworkAccess.granted(app) } }
+            initializer {
+                SettingsViewModel(
+                    app.settings,
+                    localNetworkAllowed = { LocalNetworkAccess.granted(app) },
+                    records = object : SettingsViewModel.UploadRecords {
+                        override suspend fun count() = app.syncRunner.uploadedCount()
+                        override suspend fun forget() = app.syncRunner.forgetUploads()
+                    },
+                )
+            }
         },
     )
     // Asked at the moment it is needed; if refused, the test reports why.
@@ -67,6 +82,10 @@ fun SettingsScreen(snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
     val test by vm.test.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val savedText = stringResource(R.string.saved)
+    val clearedText = stringResource(R.string.records_cleared)
+    val busyText = stringResource(R.string.records_busy)
+    val recordCount by vm.recordCount.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshRecordCount() }
 
     if (!form.loaded) return
     Column(
@@ -119,7 +138,43 @@ fun SettingsScreen(snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
         }
 
         TestResult(test)
+
+        HorizontalDivider(Modifier.padding(top = 12.dp))
+        Records(
+            count = recordCount,
+            onForget = {
+                vm.forgetRecords { done ->
+                    scope.launch { snackbar.showSnackbar(if (done) clearedText else busyText) }
+                }
+            },
+        )
         Spacer(Modifier.size(24.dp))
+    }
+}
+
+@Composable
+private fun Records(count: Int?, onForget: () -> Unit) {
+    var confirming by remember { mutableStateOf(false) }
+    Text(stringResource(R.string.records_title), style = MaterialTheme.typography.titleMedium)
+    if (count != null) Text(pluralStringResource(R.plurals.records_text, count, count))
+    OutlinedButton(onClick = { confirming = true }, enabled = (count ?: 0) > 0) {
+        Text(stringResource(R.string.records_clear))
+    }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text(stringResource(R.string.records_confirm_title)) },
+            text = { Text(stringResource(R.string.records_confirm_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    onForget()
+                }) { Text(stringResource(R.string.records_clear)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 

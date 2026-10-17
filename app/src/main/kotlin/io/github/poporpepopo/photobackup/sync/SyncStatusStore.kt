@@ -31,7 +31,7 @@ val SyncOutcome.hasError: Boolean
     get() = when (this) {
         is SyncOutcome.Finished -> summary.failed > 0
         is SyncOutcome.Aborted, is SyncOutcome.NotReady -> true
-        SyncOutcome.NotHome -> false
+        SyncOutcome.NotHome, is SyncOutcome.Stopped -> false
     }
 
 private val Context.statusStore by preferencesDataStore("sync_status")
@@ -103,6 +103,10 @@ internal object StatusCodec {
                 p[k.code] = outcome.failure.code
                 if (outcome.failure is SmbFailure.Other) p[k.detail] = outcome.failure.detail
             }
+            is SyncOutcome.Stopped -> {
+                p[k.kind] = "stopped"
+                summary(outcome.summary)
+            }
             SyncOutcome.NotHome -> p[k.kind] = "not_home"
             is SyncOutcome.NotReady -> {
                 p[k.kind] = "not_ready"
@@ -123,6 +127,7 @@ internal object StatusCodec {
         val outcome = when (p[k.kind]) {
             "finished" -> SyncOutcome.Finished(summary)
             "aborted" -> SyncOutcome.Aborted(failureOf(p[k.code], p[k.detail]), summary)
+            "stopped" -> SyncOutcome.Stopped(summary)
             "not_home" -> SyncOutcome.NotHome
             "not_ready" -> SyncOutcome.NotReady(
                 NotReadyReason.entries.firstOrNull { it.name == p[k.code] } ?: return null,

@@ -1,77 +1,43 @@
 package io.github.poporpepopo.photobackup.backup
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NameResolverTest {
 
-    /** name -> content; a null content marks a directory. */
-    private class FakeDir(
-        private val entries: Map<String, ByteArray?>,
-        private val local: ByteArray,
-    ) : RemoteDirectory {
-        val compared = mutableListOf<String>()
-
-        override fun sizeOf(name: String): Long? {
-            if (name !in entries) return null
-            return entries[name]?.size?.toLong() ?: -1L
-        }
-
-        override fun sameContentAsLocal(name: String): Boolean {
-            compared += name
-            return entries[name].contentEquals(local)
-        }
+    /** name -> size; -1 marks a directory. */
+    private class FakeDir(private val entries: Map<String, Long>) : RemoteDirectory {
+        override fun sizeOf(name: String): Long? = entries[name]
     }
 
-    private val photo = "photo bytes".toByteArray()
+    private val size = 1234L
 
     @Test fun freeNameIsUsedAsIs() {
-        val dir = FakeDir(emptyMap(), photo)
-        assertEquals(NameResolution.Upload("IMG.jpg"), NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong()))
+        assertEquals(NameResolution.Upload("IMG.jpg"), NameResolver.resolve(FakeDir(emptyMap()), "IMG.jpg", size))
     }
 
-    @Test fun identicalFileIsReportedAsAlreadyPresent() {
-        val dir = FakeDir(mapOf("IMG.jpg" to photo.copyOf()), photo)
-        assertEquals(NameResolution.AlreadyPresent("IMG.jpg"), NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong()))
+    @Test fun sameNameAndSizeIsTakenAsAlreadyPresent() {
+        val dir = FakeDir(mapOf("IMG.jpg" to size))
+        assertEquals(NameResolution.AlreadyPresent("IMG.jpg"), NameResolver.resolve(dir, "IMG.jpg", size))
     }
 
-    @Test fun differentContentGetsANumberedName() {
-        val dir = FakeDir(mapOf("IMG.jpg" to "other".toByteArray()), photo)
-        assertEquals(NameResolution.Upload("IMG (1).jpg"), NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong()))
-    }
-
-    @Test fun sameSizeButDifferentBytesGetsANumberedName() {
-        val sameSize = ByteArray(photo.size) { 'x'.code.toByte() }
-        val dir = FakeDir(mapOf("IMG.jpg" to sameSize), photo)
-        assertEquals(NameResolution.Upload("IMG (1).jpg"), NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong()))
+    @Test fun anotherSizeGetsANumberedName() {
+        val dir = FakeDir(mapOf("IMG.jpg" to size + 1))
+        assertEquals(NameResolution.Upload("IMG (1).jpg"), NameResolver.resolve(dir, "IMG.jpg", size))
     }
 
     @Test fun skipsOverSeveralTakenNames() {
-        val dir = FakeDir(
-            mapOf(
-                "IMG.jpg" to "a".toByteArray(),
-                "IMG (1).jpg" to "b".toByteArray(),
-                "IMG (2).jpg" to "c".toByteArray(),
-            ),
-            photo,
-        )
-        assertEquals(NameResolution.Upload("IMG (3).jpg"), NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong()))
+        val dir = FakeDir(mapOf("IMG.jpg" to 1L, "IMG (1).jpg" to 2L, "IMG (2).jpg" to 3L))
+        assertEquals(NameResolution.Upload("IMG (3).jpg"), NameResolver.resolve(dir, "IMG.jpg", size))
     }
 
-    @Test fun findsAnIdenticalCopyUnderANumberedName() {
-        val dir = FakeDir(mapOf("IMG.jpg" to "a".toByteArray(), "IMG (1).jpg" to photo.copyOf()), photo)
-        assertEquals(NameResolution.AlreadyPresent("IMG (1).jpg"), NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong()))
+    @Test fun findsTheSameSizeUnderANumberedName() {
+        val dir = FakeDir(mapOf("IMG.jpg" to 1L, "IMG (1).jpg" to size))
+        assertEquals(NameResolution.AlreadyPresent("IMG (1).jpg"), NameResolver.resolve(dir, "IMG.jpg", size))
     }
 
     @Test fun directoryWithTheSameNameIsSkipped() {
-        val dir = FakeDir(mapOf("IMG.jpg" to null), photo)
-        assertEquals(NameResolution.Upload("IMG (1).jpg"), NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong()))
-    }
-
-    @Test fun contentIsOnlyComparedWhenSizesMatch() {
-        val dir = FakeDir(mapOf("IMG.jpg" to "different length".toByteArray()), photo)
-        NameResolver.resolve(dir, "IMG.jpg", photo.size.toLong())
-        assertTrue(dir.compared.isEmpty())
+        val dir = FakeDir(mapOf("IMG.jpg" to -1L))
+        assertEquals(NameResolution.Upload("IMG (1).jpg"), NameResolver.resolve(dir, "IMG.jpg", size))
     }
 }
