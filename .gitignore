@@ -17,3 +17,6 @@ keystore.properties
 
 # macOS
 .DS_Store
+
+# Working notes on open issues; kept local, not published.
+docs/open-issues.md
