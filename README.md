@@ -6,6 +6,34 @@ Android の写真と動画を、自宅ルーターの USB ストレージ（SMB 
 - SMB：smbj（SMB2/3）、NTLM の MD4 は BouncyCastle を直接使う。ユーザー名があるときは SMB 署名を必須にする
 - 設定：DataStore。SMB のパスワードは Android Keystore の AES-256-GCM 鍵で暗号化して保存
 
+## 画面
+
+| 送信中 | 完了 | 設定 | 接続テストと記録 |
+|---|---|---|---|
+| <img src="docs/images/home-syncing.png" width="200" alt="送信中のホーム画面。全体の％、残り時間、送信中のファイル、中止ボタン"> | <img src="docs/images/home-done.png" width="200" alt="完了後のホーム画面。送信済み 7491 件、失敗 0 件"> | <img src="docs/images/settings.png" width="200" alt="設定画面。ルーターのアドレス、共有名、保存フォルダ、ユーザー名、パスワード"> | <img src="docs/images/settings-test.png" width="200" alt="接続テストの結果（署名つき、空き容量）と送信済みの記録"> |
+
+送信中は通知にも進み具合と「中止」が出ます。
+
+<img src="docs/images/notification.png" width="420" alt="送信中の通知。全体の％、残り時間、ファイルの進捗、中止ボタン">
+
+## 速さ
+
+<img src="docs/images/speed-chart.png" width="640" alt="平均転送速度の比較。改良前 1.15 MB/s（署名あり）と 0.81 MB/s（署名なし）、Mac の Finder 10.1 MB/s、改良後 23.4 MB/s">
+
+| 条件 | 平均 |
+|---|---|
+| 改良前・USB メモリ（署名あり） | 1.15 MB/s |
+| 改良前・USB メモリ（署名なし） | 0.81 MB/s |
+| 参考：Mac の Finder・USB メモリ（1GB のファイル1つ） | 10.1 MB/s |
+| 改良後・USB 接続の SSD（署名あり） | 23.4 MB/s |
+
+Pixel 10（Wi-Fi）から ASUS TUF-BE9400（SMB 2.0.2）へ送って測りました（2026-10-17、各75〜180秒）。遅かった原因は2つです。
+
+- smbj の書き込みは 64KB ごとに返事を待つ。返事を待たずに最大 3MB 先まで送るようにした
+- 安い USB メモリへの書き込みで、ルーターがときどき30秒ほど止まる。保存先を USB 接続の SSD に替えた
+
+署名の有無では速さは変わりませんでした。改良後、写真と動画 7491 件・約 66GB の初回のバックアップは約1時間、失敗 0 件で終わりました。
+
 ## ビルド
 
 ```sh
