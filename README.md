@@ -92,3 +92,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 バックアップと機種変更時の転送はどちらも無効にしています。暗号化したパスワードは
 この端末の Keystore 鍵でしか復号できず、移しても使えないためです。
+
+## ライセンス
+
+MIT。[LICENSE](LICENSE) を参照。
